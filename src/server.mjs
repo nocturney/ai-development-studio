@@ -11,6 +11,7 @@ import { ReviewStore } from "./agent/review-store.mjs";
 import { runReviewAgent } from "./agent/review-agent.mjs";
 import { PREVIEW_CSP, buildStaticPreview } from "./preview.mjs";
 import { diagnoseSandbox } from "./sandbox/windows.mjs";
+import { probeWindowsVm } from "./sandbox/vm-controller.mjs";
 import { validateLocalChatSelection, streamLocalChat } from "./streaming/ollama-chat.mjs";
 import { ReadonlyProjectCatalog } from "./projects/catalog.mjs";
 import { ProjectSnapshotManager } from "./projects/snapshots.mjs";
@@ -110,14 +111,20 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { cloudEnabled: false, catalog: PROVIDER_CATALOG, instances: await scanOllama() });
     }
     if (req.method === "GET" && req.url === "/api/health") {
-      return json(res, 200, { name: "ai-development-studio", version: "0.0.9", cloudEnabled: false, status: "prototype", storageMode: reviewStore.storageMode });
+      return json(res, 200, { name: "ai-development-studio", version: "0.0.10", cloudEnabled: false, status: "prototype", storageMode: reviewStore.storageMode });
     }
     if (req.method === "GET" && req.url === "/api/sandbox/diagnostic") {
-      const state = await diagnoseSandbox();
+      const [state, controller] = await Promise.all([diagnoseSandbox(), probeWindowsVm()]);
       return json(res, 200, {
         ...state,
         executionEnabled: false,
         boundary: "diagnostic-only",
+        vmController: {
+          session: controller.session,
+          readyForManualApproval: controller.featureReady,
+          reason: controller.reason,
+          launchViaWeb: false
+        },
         caution: "Git worktrees are not OS execution sandboxes"
       });
     }

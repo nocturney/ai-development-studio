@@ -2,7 +2,7 @@
 
 Standalone, local-first AI development studio. Independent repository, runtime and releases; **not an Office 2.0 component**.
 
-**Current build: v0.0.9 research prototype.** Local model chat plus two tested, **restricted** tool-using agent pilots, Git worktree review, safe static preview, run cancellation, and crash recovery. This is **not** a general-purpose Dyad replacement, a secure production execution sandbox, or an unrestricted developer agent.
+**Current build: v0.0.10 research prototype.** Local model chat plus two tested, **restricted** tool-using agent pilots, Git worktree review, safe static preview, run cancellation, and crash recovery. This is **not** a general-purpose Dyad replacement, a secure production execution sandbox, or an unrestricted developer agent.
 
 ## Run on Windows
 
@@ -29,7 +29,7 @@ Open **http://127.0.0.1:4178** on the **same machine**; the service binds only t
 - **Cancel run:** active two-file run cancellation via per-run token; cancellation prevents review approval and preserves partial files for explicit discard.
 - **Recovery:** eight-minute agent deadline, per-inference timeouts, review heartbeats and conservative recovery of stale, interrupted runs. Existing pending/approved reviews are preserved.
 - **Sandbox diagnostics:** read-only Windows Sandbox feature-state report. **Generated-code execution stays disabled even if Windows Sandbox is installed.**
-- **Offline test-runner preparation:** validated manifest and network-disabled Windows Sandbox configuration with read-only input and dedicated output. **Preparation only**; execution is not enabled and the generated .wsb file must not yet be launched.
+- **Offline runner staging and VM gate:** prepares hashed packages and network-disabled Windows Sandbox configuration with read-only inputs and a dedicated results folder. A separate, explicit interactive CLI controller can eventually start and stop a VM after verified per-job consent. This path is currently **unavailable on the connected Windows host**, where Sandbox is disabled. The browser and Agent do not launch VMs.
 - **External review storage (opt-in):** set `STUDIO_DATA_ROOT` to an absolute directory to persist Git-review pilot data separately from the checkout; the default legacy location is unchanged. No automatic migration is attempted.
 
 Cloud provider adapters remain disabled; nothing in the app automatically falls back from a local model to the cloud. Account-based free tiers can be added separately later, with explicit privacy/cost approval.
@@ -44,6 +44,7 @@ node scripts/manual-integrated-preview-smoke.mjs
 node scripts/manual-stream-smoke.mjs
 node scripts/manual-project-snapshot-smoke.mjs
 npm run runner:prepare
+npm run runner:vm-readiness
 ```
 
 Manual HTTP smoke scripts require a separate development sidecar (default `STUDIO_PORT=4179` for cancellation and `STUDIO_PORT=4180` for integrated preview). Use loopback and never expose the dev server on public interfaces. The model smoke creates an ignored pilot workspace with changes awaiting review.
@@ -54,8 +55,8 @@ Manual HTTP smoke scripts require a separate development sidecar (default `STUDI
 
 Run **one Studio server per storage directory**; cross-process locks are not implemented. Do not move existing `.pilot-workspace` directories by hand because Git worktree administrative metadata can contain absolute paths. See [Storage](docs/storage.md).
 
-The Windows host inspection found Windows Sandbox disabled; Docker and Podman were not available, and WSL was inaccessible to the remote service identity. The current implementation only diagnoses potential execution capability and generates conservative *sample* Sandbox configuration. It does **not** install, enable, launch or bypass a sandbox. Enabling Windows virtualization components may require BIOS changes and a restart.
+The Windows host inspection found Windows Sandbox disabled; Docker and Podman were not available, and WSL was inaccessible to the remote service identity. The new guarded CLI can launch **only a predefined sample job** when Sandbox is installed, an interactive user confirms the exact job, and a transient environment opt-in is present. It is not connected to the web app and has **not been exercised against a real VM**. Studio does not install, enable, or bypass OS sandbox features. Enabling virtualization components may require BIOS changes and a restart.
 
 Cursor may help review code as a separately authorized development tool, **not** as the application's model runtime. No Cursor API/Agent quota was consumed during this build.
 
-See [Project snapshots](docs/project-snapshots.md), [Read-only project browser](docs/project-browser.md), [Offline runner contract](docs/runner-contract.md), [Streaming Chat](docs/streaming-chat.md), [Storage](docs/storage.md), [Architecture](docs/architecture.md), [Git Worktrees](docs/review-worktrees.md), [Cancellation & Recovery](docs/reliability-cancellation.md), [Cursor collaboration](docs/cursor-collaboration.md), and [Provider Research](docs/providers.md).
+See [VM execution gate](docs/vm-controller.md), [Project snapshots](docs/project-snapshots.md), [Read-only project browser](docs/project-browser.md), [Offline runner contract](docs/runner-contract.md), [Streaming Chat](docs/streaming-chat.md), [Storage](docs/storage.md), [Architecture](docs/architecture.md), [Git Worktrees](docs/review-worktrees.md), [Cancellation & Recovery](docs/reliability-cancellation.md), [Cursor collaboration](docs/cursor-collaboration.md), and [Provider Research](docs/providers.md).

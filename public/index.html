@@ -441,10 +441,15 @@ async function loadSandboxDiagnostic(){
   const response=await fetch("/api/sandbox/diagnostic");
   if(!response.ok)throw Error("diagnostic not available");
   const data=await response.json();
-  sandboxStatus.textContent="Code execution disabled. "+(data.featureState==="Disabled"?
+  const featureDescription=data.featureState==="Disabled"?
    "Windows Sandbox is not enabled on this computer.":
-   data.featureState==="Enabled"?"Windows Sandbox is installed, but the trusted runner is not implemented.":
-   "Execution isolation is not yet available ("+data.reason+").");
+   data.featureState==="Enabled"?"Windows Sandbox feature enabled; actual VM runner remains unverified.":
+   "Execution isolation is not yet available ("+data.reason+").";
+  const sessionDescription=data.vmController?.session==="service-account"?
+   " Current service is not an interactive desktop session.":
+   data.vmController?.readyForManualApproval?" Manual CLI-only sample execution can require explicit user approval.":
+   " Manual VM prerequisites are not met.";
+  sandboxStatus.textContent="Web-based code execution disabled. "+featureDescription+sessionDescription;
  }catch{
   sandboxStatus.textContent="Code execution disabled. Sandbox availability could not be verified.";
  }
