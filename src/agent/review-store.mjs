@@ -114,6 +114,37 @@ export class ReviewStore {
     return records.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  // A separate process may still be running against the same store. Only recover
+  // idle runs after an intentionally conservative threshold; never delete their worktrees.
+  async recoverStaleRuns({ nowMs = Date.now(), idleMs = 15 * 60 * 1000 } = {}) {
+    if (!Number.isFinite(nowMs) || !Number.isInteger(idleMs) || idleMs < 5 * 60 * 1000) {
+      throw Error("invalid-recovery-window");
+    }
+    await this.ready();
+    const names = await fs.readdir(this.manifests);
+    const recovered = [];
+    for (const name of names) {
+      if (!name.endsWith(".json") || !ID_PATTERN.test(name.slice(0, -5))) continue;
+      const id = name.slice(0, -5);
+      let record;
+      try { record = await this.get(id); } catch { continue; }
+      if (record.status !== "running") continue;
+      const last = Date.parse(record.updatedAt ?? record.createdAt);
+      if (!Number.isFinite(last) || nowMs - last < idleMs) continue;
+      const marked = await this.fail(id, "recovered-stale-run");
+      if (marked.status === "failed") recovered.push(marked);
+    }
+    return recovered;
+  }
+
+  // Heartbeat while the model is responding and between tool calls.
+  async heartbeat(id) {
+    const item = await this.get(id);
+    if (item.status !== "running") throw Error("review-no-longer-running");
+    await this.writeManifest(item);
+    return item.updatedAt;
+  }
+
   worktreePath(id) {
     return path.join(this.worktrees, this.checkedId(id));
   }

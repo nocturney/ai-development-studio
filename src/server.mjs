@@ -12,12 +12,14 @@ import { runReviewAgent } from "./agent/review-agent.mjs";
 import { PREVIEW_CSP, buildStaticPreview } from "./preview.mjs";
 
 const HOST = "127.0.0.1";
-const PORT = 4178;
+const PORT = Number(process.env.STUDIO_PORT ?? 4178);
+if (!Number.isInteger(PORT) || PORT < 1024 || PORT > 65535) throw Error("invalid-studio-port");
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
 const PROJECT_ROOT = path.resolve(ROOT, "..");
 const reviewStore = new ReviewStore(PROJECT_ROOT);
 let agentActive = false;
 let reviewActionActive = false;
+let activeReviewRun = null;
 
 function json(res, status, data) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
@@ -113,6 +115,18 @@ const server = http.createServer(async (req, res) => {
         reviewActionActive = false;
       }
     }
+    if (req.method === "POST" && req.url === "/api/agent/review-demo/cancel") {
+      const input = await bodyJson(req);
+      if (!input || typeof input.runId !== "string" ||
+          !activeReviewRun || input.runId !== activeReviewRun.runId) {
+        return json(res, 409, { error: "review-run-not-active" });
+      }
+      activeReviewRun.controller.abort(new DOMException("cancelled-by-user", "AbortError"));
+      return json(res, 202, { cancellationRequested: true });
+    }
+    if (req.method === "GET" && req.url === "/api/agent/review-demo/status") {
+      return json(res, 200, { running: Boolean(activeReviewRun) });
+    }
     if (req.method === "POST" && req.url === "/api/agent/review-demo") {
       const input = await bodyJson(req);
       if (typeof input.model !== "string" || typeof input.baseUrl !== "string") {
@@ -126,6 +140,8 @@ const server = http.createServer(async (req, res) => {
       if (agentActive) return json(res, 409, { error: "agent-currently-running" });
       agentActive = true;
       const abort = new AbortController();
+      const runId = randomUUID();
+      activeReviewRun = { runId, controller: abort };
       res.on("close", () => abort.abort());
       res.writeHead(200, {
         "Content-Type": "text/event-stream; charset=utf-8",
@@ -137,7 +153,7 @@ const server = http.createServer(async (req, res) => {
           res.write("event: " + type + "\n" + "data: " + JSON.stringify(data) + "\n\n");
         }
       };
-      emit("start", { kind: "two-file-git-worktree", model: input.model });
+      emit("start", { kind: "two-file-git-worktree", model: input.model, runId });
       try {
         const result = await runReviewAgent({
           store: reviewStore, model: input.model, baseUrl: input.baseUrl,
@@ -151,6 +167,7 @@ const server = http.createServer(async (req, res) => {
         emit("agent-error", { error: abort.signal.aborted ? "agent-cancelled" : "agent-execution-failed" });
       } finally {
         agentActive = false;
+        if (activeReviewRun?.runId === runId) activeReviewRun = null;
         res.end();
       }
       return;
@@ -223,6 +240,12 @@ const server = http.createServer(async (req, res) => {
     json(res, 500, { error: String(error?.name === "AbortError" ? "inference-timeout" : "operation-failed") });
   }
 });
+try {
+  const stale = await reviewStore.recoverStaleRuns();
+  if (stale.length) console.warn("Recovered " + stale.length + " stale agent review(s).");
+} catch (error) {
+  console.warn("Agent review recovery unavailable:", String(error?.message ?? error));
+}
 server.listen(PORT, HOST, () => {
   console.log("AI Development Studio local prototype listening on http://" + HOST + ":" + PORT);
 });
