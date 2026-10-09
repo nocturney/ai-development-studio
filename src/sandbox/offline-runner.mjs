@@ -13,8 +13,14 @@ export function safeRelativeFile(name) {
       !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(name) || name.includes("//") ||
       name.includes("\\") || path.posix.isAbsolute(name)) throw Error("unsafe-relative-path");
   const segments = name.split("/");
-  if (segments.some(x => ["", ".", "..", ".git", "node_modules", "secrets"].includes(x) ||
-      x.startsWith(".") || x.toLowerCase().startsWith(".env"))) throw Error("unsafe-relative-path");
+  if (segments.some(x => {
+    const lower = x.toLowerCase();
+    const base = lower.split(".")[0];
+    return ["", ".", "..", ".git", "node_modules", "secrets"].includes(lower) ||
+      x.startsWith(".") || /[. ]$/.test(x) ||
+      /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/.test(base) ||
+      x.includes(":") || x.includes("~");
+  })) throw Error("unsafe-relative-path");
   if (!SUPPORTED_SUFFIXES.has(path.posix.extname(name).toLowerCase())) {
     throw Error("unsupported-source-extension");
   }
@@ -74,6 +80,8 @@ export function defineOfflineJob({ id = randomUUID(), sources, tests, timeoutSec
     return { name, bytes: size, sha256: createHash("sha256").update(content).digest("hex") };
   });
   if (total > 4 * 1024 * 1024) throw Error("runner-input-too-large");
+  const caseFolded = files.map(file => file.name.toLowerCase());
+  if (new Set(caseFolded).size !== caseFolded.length) throw Error("duplicate-case-insensitive-path");
   if (!Array.isArray(tests) || tests.length < 1 || tests.length > 16 ||
       !tests.every(name => typeof name === "string" && /\.(test|spec)\.mjs$/.test(name) &&
         files.some(file => file.name === name)) || new Set(tests).size !== tests.length) {
@@ -161,6 +169,9 @@ export function parseUntrustedRunnerResult(raw, manifest) {
       record.manifestHash !== manifest.manifestHash ||
       !["passed", "failed", "timeout", "error"].includes(record.status) ||
       !Number.isInteger(record.exitCode) || record.exitCode < -1 || record.exitCode > 255 ||
+      (record.status === "passed" && record.exitCode !== 0) ||
+      (record.status === "failed" && (record.exitCode <= 0)) ||
+      (["timeout", "error"].includes(record.status) && record.exitCode !== -1) ||
       !Number.isInteger(record.elapsedMs) || record.elapsedMs < 0 ||
       record.elapsedMs > (manifest.timeoutSeconds + 30) * 1000 ||
       typeof record.stdout !== "string" || typeof record.stderr !== "string" ||
