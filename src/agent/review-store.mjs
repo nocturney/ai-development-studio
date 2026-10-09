@@ -11,8 +11,20 @@ const ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9-]{27,28}$/;
 const PRIVATE_STATUSES = new Set(["running", "pending", "approved", "rejected", "failed"]);
 
 export class ReviewStore {
-  constructor(projectRoot) {
-    this.base = path.join(path.resolve(projectRoot), ".pilot-workspace");
+  constructor(projectRoot, { dataRoot } = {}) {
+    if (typeof projectRoot !== "string" || !path.isAbsolute(projectRoot)) {
+      throw Error("invalid-project-root");
+    }
+    if (dataRoot !== undefined) {
+      if (typeof dataRoot !== "string" || !path.isAbsolute(dataRoot) ||
+        dataRoot.length > 260 || dataRoot.includes("\0") || /[\r\n]/.test(dataRoot) ||
+        path.resolve(dataRoot) === path.parse(dataRoot).root) {
+        throw Error("invalid-data-root");
+      }
+    }
+    this.storageMode = dataRoot === undefined ? "legacy-project-local" : "external";
+    this.base = dataRoot === undefined ?
+      path.join(path.resolve(projectRoot), ".pilot-workspace") : path.resolve(dataRoot);
     this.seed = path.join(this.base, "seed-repo");
     this.worktrees = path.join(this.base, "review-worktrees");
     this.manifests = path.join(this.base, "review-manifests");
@@ -40,8 +52,17 @@ export class ReviewStore {
   }
 
   async initialize() {
+    await fs.mkdir(this.base, { recursive: true });
     await fs.mkdir(this.worktrees, { recursive: true });
     await fs.mkdir(this.manifests, { recursive: true });
+    for (const dir of [this.base, this.worktrees, this.manifests]) {
+      const info = await fs.lstat(dir);
+      if (!info.isDirectory() || info.isSymbolicLink()) throw Error("unsafe-data-directory");
+      const real = await fs.realpath(dir);
+      if (path.normalize(real).toLowerCase() !== path.normalize(dir).toLowerCase()) {
+        throw Error("data-directory-symlink-ancestor");
+      }
+    }
     const stat = await fs.lstat(this.seed).catch(error => {
       if (error.code === "ENOENT") return null;
       throw error;

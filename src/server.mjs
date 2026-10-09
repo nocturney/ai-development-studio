@@ -17,7 +17,7 @@ const PORT = Number(process.env.STUDIO_PORT ?? 4178);
 if (!Number.isInteger(PORT) || PORT < 1024 || PORT > 65535) throw Error("invalid-studio-port");
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
 const PROJECT_ROOT = path.resolve(ROOT, "..");
-const reviewStore = new ReviewStore(PROJECT_ROOT);
+const reviewStore = new ReviewStore(PROJECT_ROOT, { dataRoot: process.env.STUDIO_DATA_ROOT });
 let agentActive = false;
 let reviewActionActive = false;
 let activeReviewRun = null;
@@ -61,7 +61,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { cloudEnabled: false, catalog: PROVIDER_CATALOG, instances: await scanOllama() });
     }
     if (req.method === "GET" && req.url === "/api/health") {
-      return json(res, 200, { name: "ai-development-studio", version: "0.0.5", cloudEnabled: false, status: "prototype" });
+      return json(res, 200, { name: "ai-development-studio", version: "0.0.6", cloudEnabled: false, status: "prototype", storageMode: reviewStore.storageMode });
     }
     if (req.method === "GET" && req.url === "/api/sandbox/diagnostic") {
       const state = await diagnoseSandbox();

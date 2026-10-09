@@ -4,7 +4,7 @@ import { ReviewStore } from "../src/agent/review-store.mjs";
 import { PILOT_SEED } from "../src/agent/review-fixture.mjs";
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const store = new ReviewStore(project);
+const store = new ReviewStore(project, { dataRoot: process.env.STUDIO_DATA_ROOT });
 const base = "http://127.0.0.1:4178";
 const seedMainBefore = (await store.git(store.seed, "rev-parse", "main")).trim();
 const html = PILOT_SEED["index.html"].replace("  </main>",

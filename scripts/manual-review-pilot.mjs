@@ -4,7 +4,7 @@ import { ReviewStore } from "../src/agent/review-store.mjs";
 import { runReviewAgent } from "../src/agent/review-agent.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const store = new ReviewStore(root);
+const store = new ReviewStore(root, { dataRoot: process.env.STUDIO_DATA_ROOT });
 console.log("Pilot: two files, isolated Git worktree, no shell execution, local-only model");
 console.log("Starting main SHA:", (await store.git(root, "rev-parse", "main")).trim());
 const result = await runReviewAgent({

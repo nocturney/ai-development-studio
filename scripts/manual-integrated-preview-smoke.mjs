@@ -7,7 +7,7 @@ import { ReviewStore } from "../src/agent/review-store.mjs";
 import { PILOT_SEED } from "../src/agent/review-fixture.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const store = new ReviewStore(root);
+const store = new ReviewStore(root, { dataRoot: process.env.STUDIO_DATA_ROOT });
 const base = process.env.STUDIO_TEST_URL ?? "http://127.0.0.1:4180";
 const sandboxResponse = await fetch(base + "/api/sandbox/diagnostic");
 if (sandboxResponse.status !== 200) throw Error("Sandbox diagnostic unavailable");
