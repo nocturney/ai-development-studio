@@ -42,6 +42,10 @@ hr{border:0;border-top:1px solid #2b323c;margin:25px 0}
 #agentResult[hidden]{display:none}
 #agentTrace{font-size:12px;color:#a8b5c6;margin:8px 0;white-space:pre-wrap}
 #agentDiff{font-size:12px;line-height:1.5;background:#11151d;padding:12px;border:1px solid #394356;border-radius:9px;overflow:auto}
+.preview-title{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#a6b7c8;padding:6px 2px}
+#previewPanel{margin-top:16px;border-top:1px solid #35404e;padding-top:10px}
+#previewFrame{width:100%;height:330px;background:white;border:1px solid #415064;border-radius:10px}
+#previewPanel[hidden]{display:none}
 .diff-add{display:block;background:#143525;color:#b5efc7}.diff-remove{display:block;background:#3e2026;color:#f7b6bc}.diff-context{display:block;color:#8d9eb1}.diff-info{display:block;color:#c9bd84}
 @media(max-width:1000px){.app{grid-template-columns:210px minmax(0,1fr)}.details{display:none}}
 @media(max-width:640px){.app{display:block}aside{display:none}.chat{padding:22px}header{padding:15px;flex-wrap:wrap}.compose{padding:12px}}
@@ -67,12 +71,17 @@ hr{border:0;border-top:1px solid #2b323c;margin:25px 0}
 <div id="reviewBranch"></div><div id="reviewActions" class="review-actions" hidden>
 <button id="approveReview" disabled>Approve &amp; commit pilot branch</button><button id="discardReview" disabled>Discard / rollback pilot</button>
 </div><div id="agentTrace"></div>
-<pre id="agentDiff" aria-label="Agent file diff"></pre></section>
+<pre id="agentDiff" aria-label="Agent file diff"></pre>
+<div id="previewPanel" hidden>
+<div class="preview-title"><strong>Static preview · non-executable</strong><span>Sandboxed iframe · network blocked</span></div>
+<iframe id="previewFrame" sandbox="" referrerpolicy="no-referrer" title="Isolated static preview"></iframe>
+</div></section>
 <section id="chat" class="chat"><div class="welcome" id="welcome"><h2>Build on your own hardware.</h2><p>This is the first independent local-first studio prototype. Chat uses your existing Ollama instance; remote providers are disabled.</p></div></section>
 <div class="compose"><div class="composer"><textarea id="prompt" placeholder="Ask your local model a question..." aria-label="Prompt"></textarea><button id="send">Send</button></div>
 <div class="note" id="status">No requests leave this computer. Enter to send, Shift+Enter for newline.</div></div></main>
 <section class="details"><h2>Project foundation</h2><p class="info">This workspace will evolve into an application builder with code editor, live preview, Git diffs and an autonomous agent.</p>
-<hr><h2>Current milestone</h2><p class="info">Ollama discovery ✓<br>Local model selection ✓<br>Local chat ✓<br>Limited local agent ✓<br>Cloud egress blocked ✓</p>
+<hr><h2>Current milestone</h2><p class="info">Ollama discovery ✓<br>Local model selection ✓<br>Local chat ✓<br>Two-file review + preview ✓<br>Cancellation + recovery ✓<br>Cloud egress blocked ✓</p>
+<hr><h2>Execution safety</h2><p class="info" id="sandboxStatus">Checking local sandbox status...</p>
 <hr><h2>Later integrations</h2><div class="tag">OpenCode SDK</div><div class="tag">Git worktrees</div><div class="tag">Live preview</div><div class="tag">Provider plugins</div></section>
 </div>
 <script>
@@ -83,6 +92,8 @@ let agentIsRunning=false;
 const reviewDemo=document.getElementById("reviewDemo"),reviewActions=document.getElementById("reviewActions"),approveReview=document.getElementById("approveReview"),discardReview=document.getElementById("discardReview"),reviewBranch=document.getElementById("reviewBranch");
 let currentReview=null;
 const reviewList=document.getElementById("reviewList"),reloadReviews=document.getElementById("reloadReviews"),cancelReview=document.getElementById("cancelReview");
+const previewPanel=document.getElementById("previewPanel"),previewFrame=document.getElementById("previewFrame");
+const sandboxStatus=document.getElementById("sandboxStatus");
 let currentRunId=null;
 async function loadModels(){
  modelSelect.replaceChildren();status.textContent="Scanning Ollama on localhost...";
@@ -125,6 +136,7 @@ async function runAgentDemo(){
  const selected=JSON.parse(modelSelect.value);
  agentIsRunning=true;agentDemo.disabled=true;reviewDemo.disabled=true;send.disabled=true;
  reviewActions.hidden=true;reviewBranch.textContent="";
+ previewPanel.hidden=true;previewFrame.setAttribute("src","about:blank");
  agentResult.hidden=false;agentOutcome.textContent="Agent pilot running...";
  agentTrace.textContent="Starting local agent. Static HTML only; no shell execution.\n";
  agentDiff.replaceChildren();
@@ -197,6 +209,10 @@ function showReview(review,diff){
  approveReview.disabled=review.status!=="pending" || agentIsRunning;
  discardReview.disabled=!["pending","failed","approved"].includes(review.status) || agentIsRunning;
  if(typeof diff==="string")agentDiff.textContent=diff;
+ const canPreview=["pending","approved"].includes(review.status);
+ previewPanel.hidden=!canPreview;
+ const source=canPreview?"/api/agent/reviews/preview?id="+encodeURIComponent(review.id):"about:blank";
+ if(previewFrame.getAttribute("src")!==source)previewFrame.setAttribute("src",source);
 }
 async function loadLatestReview(preferredId){
  try{
@@ -212,7 +228,9 @@ async function loadLatestReview(preferredId){
   }
   if(!reviews.length){
    const option=document.createElement("option");option.textContent="No saved reviews";
-   reviewList.appendChild(option);reviewList.disabled=true;return;
+   reviewList.appendChild(option);reviewList.disabled=true;
+   previewPanel.hidden=true;previewFrame.setAttribute("src","about:blank");
+   reviewActions.hidden=true;return;
   }
   reviewList.disabled=false;
   const review=reviews.find(item=>item.id===preferredId)||reviews[0];
@@ -232,6 +250,7 @@ async function runReviewDemo(){
  agentIsRunning=true;reviewDemo.disabled=true;agentDemo.disabled=true;send.disabled=true;
  cancelReview.disabled=true;currentRunId=null;
  reviewActions.hidden=true;currentReview=null;reviewBranch.textContent="";
+ previewPanel.hidden=true;previewFrame.setAttribute("src","about:blank");
  agentResult.hidden=false;agentOutcome.textContent="Two-file Git worktree pilot running...";
  agentTrace.textContent="Creating isolated branch and editing two files. No shell or automatic commits.\n";
  agentDiff.textContent="";
@@ -345,8 +364,22 @@ discardReview.addEventListener("click",()=>actOnReview("discard"));
 send.addEventListener("click",submit);
 prompt.addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();submit()}});
 document.getElementById("refresh").addEventListener("click",loadModels);
+async function loadSandboxDiagnostic(){
+ try{
+  const response=await fetch("/api/sandbox/diagnostic");
+  if(!response.ok)throw Error("diagnostic not available");
+  const data=await response.json();
+  sandboxStatus.textContent="Code execution disabled. "+(data.featureState==="Disabled"?
+   "Windows Sandbox is not enabled on this computer.":
+   data.featureState==="Enabled"?"Windows Sandbox is installed, but the trusted runner is not implemented.":
+   "Execution isolation is not yet available ("+data.reason+").");
+ }catch{
+  sandboxStatus.textContent="Code execution disabled. Sandbox availability could not be verified.";
+ }
+}
 loadModels();
 loadLatestReview();
+loadSandboxDiagnostic();
 </script>
 </body>
 </html>

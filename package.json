@@ -1,6 +1,6 @@
 {
   "name": "ai-development-studio",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "private": true,
   "type": "module",
   "description": "Standalone local-first AI development studio prototype",
@@ -11,5 +11,10 @@
     "providers": "node src/cli.mjs providers",
     "test": "node --test && node scripts/check-ui.mjs && node --check src/server.mjs"
   },
-  "engines": { "node": ">=22" }
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "parse5": "8.0.1"
+  }
 }
