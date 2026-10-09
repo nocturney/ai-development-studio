@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import { VmOwnershipJournal } from "../src/sandbox/vm-journal.mjs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -33,7 +34,8 @@ async function withPrepared(run) {
     status: "passed", exitCode: 0, elapsedMs: 150, stdout: "tests passed", stderr: ""
   });
   const args = {
-    staged, approval: expectedVmApproval(staged), executionOptIn: true,
+    staged, journal: new VmOwnershipJournal(path.join(root, "jobs")),
+    approval: expectedVmApproval(staged), executionOptIn: true,
     interactiveConfirmation: true, vmId: VM_ID, startupGraceMs: 1000,
     readinessProbe: async () => ({
       schema: VM_TEST_DRIVER, platform: "win32", session: "interactive",
@@ -261,5 +263,13 @@ test("result-size violation is rejected and still triggers VM stop", async () =>
       }
     }), /unsafe-vm-result/);
     assert.deepEqual(calls.map(c => c.args[0]), ["start", "stop"]);
+  });
+});
+
+test("any VM execution entrypoint must supply a durable ownership journal", async () => {
+  await withPrepared(async ({ args, calls }) => {
+    await assert.rejects(runWindowsVmJob({ ...args, journal: null }),
+      /vm-ownership-journal-required/);
+    assert.equal(calls.length, 0);
   });
 });

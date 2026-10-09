@@ -10,6 +10,7 @@ import { createInterface } from "node:readline/promises";
 import { probeWindowsVm, expectedVmApproval, runWindowsVmJob } from "../src/sandbox/vm-controller.mjs";
 import { stageOfflineRunnerJob } from "../src/sandbox/offline-runner.mjs";
 import { diagnoseSandbox } from "../src/sandbox/windows.mjs";
+import { VmOwnershipJournal } from "../src/sandbox/vm-journal.mjs";
 
 const args = process.argv.slice(2);
 if (args.length > 1 || (args.length && !["--status", "--run-demo"].includes(args[0]))) {
@@ -17,7 +18,14 @@ if (args.length > 1 || (args.length && !["--status", "--run-demo"].includes(args
   process.exit(2);
 }
 const mode = args[0] ?? "--status";
-const [host, feature] = await Promise.all([probeWindowsVm(), diagnoseSandbox()]);
+const root = path.resolve(process.env.STUDIO_RUNNER_JOBS_ROOT ??
+  (process.env.LOCALAPPDATA ?
+    path.join(process.env.LOCALAPPDATA, "AIStudio", "SandboxJobs") :
+    path.join(process.cwd(), ".pilot-workspace", "offline-runner-packages")));
+const journal = new VmOwnershipJournal(root);
+const [host, feature, priorOwnership] = await Promise.all([
+  probeWindowsVm(), diagnoseSandbox(), journal.inspect()
+]);
 console.log(JSON.stringify({
   schema: host.schema,
   platform: host.platform,
@@ -27,10 +35,15 @@ console.log(JSON.stringify({
   featureReady: host.featureReady,
   executionEnabled: false,
   reason: host.reason,
+  vmOwnership: priorOwnership,
   note: "Read-only diagnostic. No VM has been launched."
 }, null, 2));
 if (mode === "--status") process.exit(0);
 
+if (priorOwnership.active) {
+  console.error("A previous VM ownership record requires manual review before any new run.");
+  process.exit(2);
+}
 if (!host.featureReady) {
   console.error("Sandbox unavailable; no staging or execution attempted.");
   process.exit(2);
@@ -43,8 +56,6 @@ if (!process.stdin.isTTY || !process.stdout.isTTY) {
   console.error("Refusing VM execution from a service, pipe, automation or non-interactive terminal.");
   process.exit(2);
 }
-const root = path.resolve(process.env.STUDIO_RUNNER_JOBS_ROOT ??
-  path.join(process.cwd(), ".pilot-workspace", "offline-runner-packages"));
 const rootUpper = path.parse(root).root;
 if (root.toLowerCase() === rootUpper.toLowerCase() || root.length > 200) {
   throw Error("unsafe-runner-root");
@@ -92,7 +103,7 @@ try {
     staged, approval: entered,
     executionOptIn: process.env.STUDIO_ALLOW_VM_EXECUTION === "1",
     interactiveConfirmation: true, signal: controller.signal,
-    onEvent: event => console.log("VM EVENT " + JSON.stringify(event))
+    journal, onEvent: event => console.log("VM EVENT " + JSON.stringify(event))
   });
   console.log(JSON.stringify({
     jobId: staged.id, vmId: outcome.vmId, guestStatus: outcome.status,

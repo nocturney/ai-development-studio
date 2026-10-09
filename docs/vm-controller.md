@@ -1,4 +1,4 @@
-# Windows Sandbox VM execution gate — v0.0.10
+# Windows Sandbox VM execution gate — v0.0.11
 
 ## Current status
 
@@ -54,7 +54,7 @@ It exposes only a read-only input bundle and a dedicated writable result folder.
   guest isolation, startup performance, networking behavior, or shutdown behavior.
 - Unexpected host termination during the startup/stop window may leave a VM that
   requires manual investigation with WSB list and WSB stop --id.
-- VM job ownership locks and post-crash VM recovery are not yet implemented.
+- A persistent VM ownership journal now records the VM ID and blocks concurrent starts or silent resumption after a crash. Automatic orphan termination and safe operator-driven journal unlock are still not implemented; see docs/vm-ownership.md.
 - A privileged host process could alter staging inputs between verification and launch;
   run from a protected, single-writer staging directory.
 - Guest success is not proof of secure code and never auto-approves source changes.
