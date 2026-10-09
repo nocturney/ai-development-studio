@@ -11,6 +11,7 @@ import { ReviewStore } from "./agent/review-store.mjs";
 import { runReviewAgent } from "./agent/review-agent.mjs";
 import { PREVIEW_CSP, buildStaticPreview } from "./preview.mjs";
 import { diagnoseSandbox } from "./sandbox/windows.mjs";
+import { validateLocalChatSelection, streamLocalChat } from "./streaming/ollama-chat.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.STUDIO_PORT ?? 4178);
@@ -21,6 +22,7 @@ const reviewStore = new ReviewStore(PROJECT_ROOT, { dataRoot: process.env.STUDIO
 let agentActive = false;
 let reviewActionActive = false;
 let activeReviewRun = null;
+let chatStreamActive = false;
 
 function json(res, status, data) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
@@ -61,7 +63,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { cloudEnabled: false, catalog: PROVIDER_CATALOG, instances: await scanOllama() });
     }
     if (req.method === "GET" && req.url === "/api/health") {
-      return json(res, 200, { name: "ai-development-studio", version: "0.0.6", cloudEnabled: false, status: "prototype", storageMode: reviewStore.storageMode });
+      return json(res, 200, { name: "ai-development-studio", version: "0.0.7", cloudEnabled: false, status: "prototype", storageMode: reviewStore.storageMode });
     }
     if (req.method === "GET" && req.url === "/api/sandbox/diagnostic") {
       const state = await diagnoseSandbox();
@@ -215,6 +217,50 @@ const server = http.createServer(async (req, res) => {
         emit("agent-error", { error: error?.name === "TimeoutError" ? "model-timeout" : "agent-failed" });
       } finally {
         agentActive = false;
+        res.end();
+      }
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/chat/stream") {
+      const input = await bodyJson(req);
+      let selected;
+      try {
+        selected = validateLocalChatSelection(input, await scanOllama());
+      } catch (error) {
+        return json(res, 400, { error: String(error?.message ?? "invalid-chat-request") });
+      }
+      if (chatStreamActive || agentActive) return json(res, 409, { error: "local-inference-busy" });
+      chatStreamActive = true;
+      const abort = new AbortController();
+      res.on("close", () => abort.abort(new DOMException("browser-disconnected", "AbortError")));
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-store", Connection: "keep-alive",
+        "X-Content-Type-Options": "nosniff"
+      });
+      const emit = (event, data) => {
+        if (!res.destroyed && !res.writableEnded) {
+          res.write("event: " + event + "\n" + "data: " + JSON.stringify(data) + "\n\n");
+        }
+      };
+      emit("start", { provider: "ollama", model: selected.model });
+      try {
+        await streamLocalChat({
+          selected, signal: abort.signal,
+          onDelta: delta => emit("delta", { text: delta }),
+          onDone: result => emit("done", { model: selected.model, usage: result.usage })
+        });
+      } catch (error) {
+        const reason = abort.signal.aborted ? "chat-cancelled" :
+          error?.name === "TimeoutError" ? "chat-timeout" :
+          ["ollama-stream-unavailable", "ollama-stream-ended-before-done",
+           "invalid-ollama-stream-json", "ollama-model-error",
+           "invalid-ollama-stream-frame", "ollama-stream-frame-too-large",
+           "ollama-output-too-large"].includes(error?.message) ?
+          error.message : "local-stream-failed";
+        emit("chat-error", { error: reason });
+      } finally {
+        chatStreamActive = false;
         res.end();
       }
       return;

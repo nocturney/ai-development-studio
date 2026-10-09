@@ -28,6 +28,8 @@ select{padding:10px;max-width:330px}button{cursor:pointer;padding:10px 14px}butt
 .compose{padding:0 33px 25px}.composer{display:flex;align-items:end;gap:12px;padding:12px;border:1px solid #384252;background:#1c222c;border-radius:14px}
 textarea{border:none;resize:vertical;min-height:62px;max-height:210px;outline:none;background:transparent;width:100%;padding:10px}
 #send{background:#acc6f6;color:#18283d;border:none;font-weight:650}
+#stopChat{border:1px solid #875253;color:#f0bbb9}
+#stopChat[disabled]{display:none}
 .note{font-size:11px;color:#808a99;padding:9px 4px}.info{font-size:13px;color:#aeb9c7;line-height:1.6}
 .tag{display:inline-block;padding:4px 7px;border:1px solid #384150;border-radius:6px;font-size:11px;margin:4px 2px}
 hr{border:0;border-top:1px solid #2b323c;margin:25px 0}
@@ -62,7 +64,7 @@ hr{border:0;border-top:1px solid #2b323c;margin:25px 0}
 <div class="option disabled"><span>Puter.js</span><span class="status">Off</span></div>
 <div class="section">Privacy</div><p class="info">No cloud model requests. No developer API keys. Chat history stays in browser memory. Agent demo files stay in a separate local test folder.</p>
 </aside>
-<main><header><div><h1>Local model workspace</h1><small>Prototype · local chat + limited tool-using agent</small></div>
+<main><header><div><h1>Local model workspace</h1><small>v0.0.7 · streaming chat · restricted coding agent · static preview</small></div>
 <div><select id="model" aria-label="Choose a local model"><option>Scanning local models...</option></select>
 <button id="refresh" title="Refresh local models">↻</button></div></header>
 <section class="agentbar"><button id="agentDemo" disabled>One-file demo</button><button id="reviewDemo" disabled>Run two-file worktree demo</button><button id="cancelReview" disabled>Cancel current run</button><select id="reviewList" aria-label="Previous agent reviews"><option>Review history...</option></select><button id="reloadReviews" title="Refresh reviews">↻</button>
@@ -77,17 +79,19 @@ hr{border:0;border-top:1px solid #2b323c;margin:25px 0}
 <iframe id="previewFrame" sandbox="" referrerpolicy="no-referrer" title="Isolated static preview"></iframe>
 </div></section>
 <section id="chat" class="chat"><div class="welcome" id="welcome"><h2>Build on your own hardware.</h2><p>This is the first independent local-first studio prototype. Chat uses your existing Ollama instance; remote providers are disabled.</p></div></section>
-<div class="compose"><div class="composer"><textarea id="prompt" placeholder="Ask your local model a question..." aria-label="Prompt"></textarea><button id="send">Send</button></div>
+<div class="compose"><div class="composer"><textarea id="prompt" placeholder="Ask your local model a question..." aria-label="Prompt"></textarea><button id="stopChat" disabled>Stop</button><button id="send">Send</button></div>
 <div class="note" id="status">No requests leave this computer. Enter to send, Shift+Enter for newline.</div></div></main>
 <section class="details"><h2>Project foundation</h2><p class="info">This workspace will evolve into an application builder with code editor, live preview, Git diffs and an autonomous agent.</p>
-<hr><h2>Current milestone</h2><p class="info">Ollama discovery ✓<br>Local model selection ✓<br>Local chat ✓<br>Two-file review + preview ✓<br>Cancellation + recovery ✓<br>Cloud egress blocked ✓</p>
+<hr><h2>Current milestone</h2><p class="info">Ollama discovery ✓<br>Streaming local chat + Stop ✓<br>Two-file review + preview ✓<br>Cancellation + recovery ✓<br>Runner package preparation ✓<br>Cloud egress blocked ✓</p>
 <hr><h2>Review storage</h2><p class="info" id="storageStatus">Checking local review data storage...</p>
 <hr><h2>Execution safety</h2><p class="info" id="sandboxStatus">Checking local sandbox status...</p>
-<hr><h2>Later integrations</h2><div class="tag">OpenCode SDK</div><div class="tag">Git worktrees</div><div class="tag">Live preview</div><div class="tag">Provider plugins</div></section>
+<hr><h2>Later integrations</h2><div class="tag">OpenCode SDK</div><div class="tag">Isolated execution</div><div class="tag">Executable preview</div><div class="tag">Provider plugins</div></section>
 </div>
 <script>
 const modelSelect=document.getElementById("model"),chat=document.getElementById("chat"),prompt=document.getElementById("prompt"),send=document.getElementById("send"),status=document.getElementById("status");
 const messages=[];
+const stopChat=document.getElementById("stopChat");
+let currentChatController=null;
 const agentDemo=document.getElementById("agentDemo"),agentState=document.getElementById("agentState"),agentResult=document.getElementById("agentResult"),agentTrace=document.getElementById("agentTrace"),agentDiff=document.getElementById("agentDiff"),agentOutcome=document.getElementById("agentOutcome");
 let agentIsRunning=false;
 const reviewDemo=document.getElementById("reviewDemo"),reviewActions=document.getElementById("reviewActions"),approveReview=document.getElementById("approveReview"),discardReview=document.getElementById("discardReview"),reviewBranch=document.getElementById("reviewBranch");
@@ -120,18 +124,73 @@ function addMessage(role,text){
  const p=document.createElement("div");p.className="message "+role;p.textContent=text;chat.appendChild(p);chat.scrollTop=chat.scrollHeight;
 }
 async function submit(){
- const message=prompt.value.trim();if(!message||send.disabled||!modelSelect.value.startsWith("{"))return;
- const selected=JSON.parse(modelSelect.value);prompt.value="";messages.push({role:"user",content:message});addMessage("user",message);
- send.disabled=true;status.textContent="Asking "+selected.model+" locally...";
+ const message=prompt.value.trim();
+ if(!message||send.disabled||currentChatController||agentIsRunning||!modelSelect.value.startsWith("{"))return;
+ const selected=JSON.parse(modelSelect.value);
+ const controller=new AbortController();
+ currentChatController=controller;
+ prompt.value="";messages.push({role:"user",content:message});
+ addMessage("user",message);send.disabled=true;stopChat.disabled=false;
+ status.textContent="Streaming from "+selected.model+" locally...";
+ const assistantNode=document.createElement("div");
+ assistantNode.className="message assistant";assistantNode.textContent="...";
+ chat.appendChild(assistantNode);chat.scrollTop=chat.scrollHeight;
+ let answer="",finished=false;
  try{
-  const response=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...selected,messages:messages.slice(-12)})});
-  const result=await response.json();
-  if(!response.ok)throw Error(result.error||"Model error");
-  const answer=result.content||"(No text returned)";messages.push({role:"assistant",content:answer});addMessage("assistant",answer);
-  status.textContent="Completed locally with "+selected.model;
- }catch(error){addMessage("assistant","Request failed: "+error.message);status.textContent="Local request failed. No cloud fallback."}
- finally{send.disabled=false;prompt.focus()}
+  const response=await fetch("/api/chat/stream",{
+   method:"POST",headers:{"Content-Type":"application/json"},signal:controller.signal,
+   body:JSON.stringify({...selected,messages:messages.slice(-12)})
+  });
+  if(!response.ok){
+   const data=await response.json().catch(()=>({}));
+   throw Error(data.error||"Local chat request was rejected");
+  }
+  if(!response.body)throw Error("Streaming is unavailable");
+  const reader=response.body.getReader(),decoder=new TextDecoder();
+  let buffer="";
+  function onEvent(raw){
+   const lines=raw.split("\n");
+   const event=lines.find(line=>line.startsWith("event: "))?.slice(7);
+   const dataLine=lines.find(line=>line.startsWith("data: "));
+   if(!event||!dataLine)return;
+   const data=JSON.parse(dataLine.slice(6));
+   if(event==="delta"){
+    answer+=String(data.text??"");
+    assistantNode.textContent=answer;
+    chat.scrollTop=chat.scrollHeight;
+   }else if(event==="done"){
+    finished=true;
+    status.textContent="Completed locally with "+selected.model+
+      (data.usage?.outputTokens!=null?" · "+data.usage.outputTokens+" tokens":"");
+   }else if(event==="chat-error"){
+    throw Error(data.error||"Local inference failed");
+   }
+  }
+  while(true){
+   const {done,value}=await reader.read();
+   if(done)break;
+   buffer+=decoder.decode(value,{stream:true}).replace(/\r\n/g,"\n");
+   if(buffer.length>100000)throw Error("Response stream too large");
+   let end;
+   while((end=buffer.indexOf("\n\n"))!==-1){
+    const raw=buffer.slice(0,end);buffer=buffer.slice(end+2);onEvent(raw);
+   }
+  }
+  if(!finished)throw Error("Model stream ended early");
+  assistantNode.textContent=answer||"(No text returned)";
+  messages.push({role:"assistant",content:answer||"(No text returned)"});
+ }catch(error){
+  const cancelled=controller.signal.aborted;
+  assistantNode.textContent=(answer||"")+(cancelled?"\n[Stopped]":"\n[Incomplete response: "+error.message+"]");
+  status.textContent=cancelled?"Chat stopped. No cloud fallback.":"Local chat failed. No cloud fallback.";
+ }finally{
+  currentChatController=null;stopChat.disabled=true;
+  send.disabled=agentIsRunning;prompt.focus();
+ }
 }
+stopChat.addEventListener("click",()=>{
+ if(currentChatController&&!currentChatController.signal.aborted)currentChatController.abort();
+});
 async function runAgentDemo(){
  if(agentIsRunning || !modelSelect.value.startsWith("{"))return;
  const selected=JSON.parse(modelSelect.value);
