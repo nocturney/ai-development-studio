@@ -56,12 +56,19 @@ function requireLocalBase(baseUrl) {
 
 export async function runReviewAgent({
   store, model = "qwen3.5:9b", baseUrl = "http://127.0.0.1:11555",
-  fetchImpl = fetch, maxSteps = 10, onEvent = () => {}, signal
+  fetchImpl = fetch, maxSteps = 10, onEvent = () => {}, signal,
+  maxRunMs = 8 * 60 * 1000
 }) {
   if (!(store instanceof ReviewStore)) throw Error("trusted-store-required");
   const origin = requireLocalBase(baseUrl);
   if (!/^[\w.:/-]{3,120}$/.test(model)) throw Error("invalid-model");
   if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 16) throw Error("invalid-step-limit");
+  if (!Number.isInteger(maxRunMs) || maxRunMs < 1000 || maxRunMs > 20 * 60 * 1000) {
+    throw Error("invalid-run-duration");
+  }
+  const deadline = AbortSignal.timeout(maxRunMs);
+  const activeSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  activeSignal.throwIfAborted();
   const session = await store.create();
   const events = [];
   const modified = new Set();
@@ -81,10 +88,11 @@ export async function runReviewAgent({
 
   try {
     for (let step = 1; step <= maxSteps && summary === null; step++) {
-      signal?.throwIfAborted();
+      activeSignal.throwIfAborted();
+      await store.heartbeat(session.id);
       const response = await fetchImpl(origin + "/api/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(115000)]) : AbortSignal.timeout(115000),
+        signal: AbortSignal.any([activeSignal, AbortSignal.timeout(115000)]),
         body: JSON.stringify({
           model, stream: false, think: false,
           messages, tools: REVIEW_TOOLS,
@@ -93,6 +101,7 @@ export async function runReviewAgent({
       });
       if (!response.ok) throw Error("model-http-" + response.status);
       const result = await response.json();
+      activeSignal.throwIfAborted();
       const assistant = result.message ?? {};
       const calls = Array.isArray(assistant.tool_calls) ? assistant.tool_calls : [];
       emit({ kind: "inference", step, toolCount: calls.length });
@@ -103,6 +112,7 @@ export async function runReviewAgent({
       }
       messages.push({ role: "assistant", content: String(assistant.content ?? ""), tool_calls: calls });
       for (const call of calls) {
+        activeSignal.throwIfAborted();
         const name = call?.function?.name;
         let feedback;
         let success = false;
@@ -138,6 +148,8 @@ export async function runReviewAgent({
         } catch (error) {
           feedback = { error: String(error?.message ?? error).slice(0, 180) };
         }
+        activeSignal.throwIfAborted();
+        await store.heartbeat(session.id);
         emit({ kind: "tool", step, tool: String(name ?? "unknown"), ok: success,
           passed: name === "run_checks" ? checksPassed : undefined,
           error: success ? undefined : feedback.error });
@@ -147,7 +159,9 @@ export async function runReviewAgent({
       }
     }
 
+    activeSignal.throwIfAborted();
     const prepared = await store.prepare(session.id);
+    activeSignal.throwIfAborted();
     const ok = prepared.status === "pending" && summary !== null;
     if (!ok && prepared.status === "pending") await store.fail(session.id, "agent-incomplete");
     const review = ok ? prepared : await store.get(session.id);
@@ -158,8 +172,10 @@ export async function runReviewAgent({
       checks: prepared.checks, diff: await store.diff(session.id), events
     };
   } catch (error) {
-    await store.fail(session.id, "agent-error: " + String(error?.message ?? error));
-    emit({ kind: "error", id: session.id, error: String(error?.message ?? error).slice(0, 180) });
+    const reason = signal?.aborted ? "cancelled-by-user" : deadline.aborted ?
+      "agent-deadline-exceeded" : "agent-error: " + String(error?.message ?? error);
+    await store.fail(session.id, reason);
+    emit({ kind: "error", id: session.id, error: String(reason).slice(0, 180) });
     throw error;
   }
 }
