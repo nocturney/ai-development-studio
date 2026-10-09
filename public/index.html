@@ -31,6 +31,14 @@ textarea{border:none;resize:vertical;min-height:62px;max-height:210px;outline:no
 .note{font-size:11px;color:#808a99;padding:9px 4px}.info{font-size:13px;color:#aeb9c7;line-height:1.6}
 .tag{display:inline-block;padding:4px 7px;border:1px solid #384150;border-radius:6px;font-size:11px;margin:4px 2px}
 hr{border:0;border-top:1px solid #2b323c;margin:25px 0}
+.agentbar{padding:12px 32px;background:#1a2130;border-bottom:1px solid #333d4d;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+#agentDemo{background:#2c466a;border-color:#6483b0;font-weight:600;font-size:13px}
+.agentbar span{font-size:12px;color:#b3bfd2}
+#agentResult{padding:18px 32px;background:#141b24;border-bottom:1px solid #303947;max-height:40vh;overflow:auto}
+#agentResult[hidden]{display:none}
+#agentTrace{font-size:12px;color:#a8b5c6;margin:8px 0;white-space:pre-wrap}
+#agentDiff{font-size:12px;line-height:1.5;background:#11151d;padding:12px;border:1px solid #394356;border-radius:9px;overflow:auto}
+.diff-add{display:block;background:#143525;color:#b5efc7}.diff-remove{display:block;background:#3e2026;color:#f7b6bc}.diff-context{display:block;color:#8d9eb1}.diff-info{display:block;color:#c9bd84}
 @media(max-width:1000px){.app{grid-template-columns:210px minmax(0,1fr)}.details{display:none}}
 @media(max-width:640px){.app{display:block}aside{display:none}.chat{padding:22px}header{padding:15px;flex-wrap:wrap}.compose{padding:12px}}
 </style>
@@ -44,21 +52,27 @@ hr{border:0;border-top:1px solid #2b323c;margin:25px 0}
 <div class="option disabled"><span>OpenRouter Free</span><span class="status">Off</span></div>
 <div class="option disabled"><span>Groq Free</span><span class="status">Off</span></div>
 <div class="option disabled"><span>Puter.js</span><span class="status">Off</span></div>
-<div class="section">Privacy</div><p class="info">No cloud model requests. No developer API keys. Conversations stay in browser memory and are not persisted by this prototype.</p>
+<div class="section">Privacy</div><p class="info">No cloud model requests. No developer API keys. Chat history stays in browser memory. Agent demo files stay in a separate local test folder.</p>
 </aside>
-<main><header><div><h1>Local model workspace</h1><small>Prototype · model chat only · agent tools coming later</small></div>
+<main><header><div><h1>Local model workspace</h1><small>Prototype · local chat + limited tool-using agent</small></div>
 <div><select id="model" aria-label="Choose a local model"><option>Scanning local models...</option></select>
 <button id="refresh" title="Refresh local models">↻</button></div></header>
+<section class="agentbar"><button id="agentDemo" disabled>Run safe agent demo</button>
+<span id="agentState">Static HTML pilot: reads, edits, checks and displays a diff. No shell execution.</span></section>
+<section id="agentResult" hidden><h2 id="agentOutcome">Agent pilot</h2><div id="agentTrace"></div>
+<pre id="agentDiff" aria-label="Agent file diff"></pre></section>
 <section id="chat" class="chat"><div class="welcome" id="welcome"><h2>Build on your own hardware.</h2><p>This is the first independent local-first studio prototype. Chat uses your existing Ollama instance; remote providers are disabled.</p></div></section>
 <div class="compose"><div class="composer"><textarea id="prompt" placeholder="Ask your local model a question..." aria-label="Prompt"></textarea><button id="send">Send</button></div>
 <div class="note" id="status">No requests leave this computer. Enter to send, Shift+Enter for newline.</div></div></main>
 <section class="details"><h2>Project foundation</h2><p class="info">This workspace will evolve into an application builder with code editor, live preview, Git diffs and an autonomous agent.</p>
-<hr><h2>Current milestone</h2><p class="info">Ollama discovery ✓<br>Local model selection ✓<br>Local chat ✓<br>Cloud egress blocked ✓</p>
+<hr><h2>Current milestone</h2><p class="info">Ollama discovery ✓<br>Local model selection ✓<br>Local chat ✓<br>Limited local agent ✓<br>Cloud egress blocked ✓</p>
 <hr><h2>Later integrations</h2><div class="tag">OpenCode SDK</div><div class="tag">Git worktrees</div><div class="tag">Live preview</div><div class="tag">Provider plugins</div></section>
 </div>
 <script>
 const modelSelect=document.getElementById("model"),chat=document.getElementById("chat"),prompt=document.getElementById("prompt"),send=document.getElementById("send"),status=document.getElementById("status");
 const messages=[];
+const agentDemo=document.getElementById("agentDemo"),agentState=document.getElementById("agentState"),agentResult=document.getElementById("agentResult"),agentTrace=document.getElementById("agentTrace"),agentDiff=document.getElementById("agentDiff"),agentOutcome=document.getElementById("agentOutcome");
+let agentIsRunning=false;
 async function loadModels(){
  modelSelect.replaceChildren();status.textContent="Scanning Ollama on localhost...";
  try{
@@ -72,7 +86,8 @@ async function loadModels(){
    }
   }
   if(!modelSelect.options.length){const option=document.createElement("option");option.textContent="No local models found";modelSelect.appendChild(option)}
-  send.disabled=!data.instances.length;
+  send.disabled=!data.instances.length || agentIsRunning;
+  agentDemo.disabled=!data.instances.length || agentIsRunning;
   status.textContent=data.instances.length+" local Ollama instance(s) connected. Cloud providers disabled.";
  }catch(e){send.disabled=true;status.textContent="Could not scan local Ollama."}
 }
@@ -93,6 +108,71 @@ async function submit(){
  }catch(error){addMessage("assistant","Request failed: "+error.message);status.textContent="Local request failed. No cloud fallback."}
  finally{send.disabled=false;prompt.focus()}
 }
+async function runAgentDemo(){
+ if(agentIsRunning || !modelSelect.value.startsWith("{"))return;
+ const selected=JSON.parse(modelSelect.value);
+ agentIsRunning=true;agentDemo.disabled=true;send.disabled=true;
+ agentResult.hidden=false;agentOutcome.textContent="Agent pilot running...";
+ agentTrace.textContent="Starting local agent. Static HTML only; no shell execution.\n";
+ agentDiff.replaceChildren();
+ agentState.textContent="Working with "+selected.model+" locally...";
+ let finished=false;
+ try{
+  const response=await fetch("/api/agent/demo",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify(selected)
+  });
+  if(!response.ok){
+   const error=await response.json().catch(()=>({error:"Request failed"}));
+   throw Error(error.error||"Request failed");
+  }
+  if(!response.body)throw Error("Streaming response unavailable");
+  const reader=response.body.getReader(),decoder=new TextDecoder();
+  let buffer="";
+  function handleEvent(raw){
+   const lines=raw.split("\n"),event=lines.find(l=>l.startsWith("event: "))?.slice(7);
+   const dataLine=lines.find(l=>l.startsWith("data: "));
+   if(!dataLine)return;
+   const data=JSON.parse(dataLine.slice(6));
+   if(event==="progress" && data.kind==="tool"){
+    agentTrace.textContent+="Step "+data.step+" · "+data.tool+" · "+(data.ok?"OK":"FAILED")+"\n";
+    agentState.textContent="Agent tool: "+data.tool;
+   }else if(event==="done"){
+    finished=true;
+    agentOutcome.textContent=data.ok?"Agent task completed":"Agent task incomplete";
+    agentTrace.textContent+=data.summary+"\n";
+    agentTrace.textContent+="Checks: "+data.check.checks.map(x=>x.name+" "+(x.pass?"✓":"✗")).join(" · ")+"\n";
+    for(const row of data.diff){
+     const line=document.createElement("span");
+     line.className="diff-"+row.type;
+     line.textContent=row.text;
+     agentDiff.appendChild(line);
+    }
+    agentState.textContent=data.ok?"Agent passed its static checks. Review the diff.":"Agent did not pass its checks.";
+   }else if(event==="agent-error"){
+    throw Error(data.error||"Agent error");
+   }
+  }
+  while(true){
+   const {done,value}=await reader.read();
+   if(done)break;
+   buffer+=decoder.decode(value,{stream:true}).replace(/\r\n/g,"\n");
+   let end;
+   while((end=buffer.indexOf("\n\n"))!==-1){
+    const eventText=buffer.slice(0,end);buffer=buffer.slice(end+2);
+    handleEvent(eventText);
+   }
+  }
+  if(!finished)throw Error("Agent stream closed before completion");
+ }catch(error){
+  agentOutcome.textContent="Agent task failed";
+  agentTrace.textContent+="Error: "+error.message+"\n";
+  agentState.textContent="Agent stopped without a complete result. No cloud fallback.";
+ }finally{
+  agentIsRunning=false;agentDemo.disabled=false;send.disabled=false;
+ }
+}
+agentDemo.addEventListener("click",runAgentDemo);
 send.addEventListener("click",submit);
 prompt.addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();submit()}});
 document.getElementById("refresh").addEventListener("click",loadModels);

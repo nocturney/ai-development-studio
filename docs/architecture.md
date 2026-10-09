@@ -3,6 +3,8 @@
 Date: 2026-10-09
 State: Accepted for prototype; revisable after benchmark.
 
+Prototype update (2026-10-09): v0.0.3 now has a loopback-only web UI with a restricted agent demo, streamed tool events, and a line diff. The first CLI and SSE end-to-end runs passed on Qwen 3.5 9B via the existing Windows Ollama process. The executor supports only a single static HTML pilot file and does not grant shell access. This is NOT a production multi-file coding agent.
+
 ## Isolation
 The studio has an independent repository, release lifecycle, settings, credentials, UI, model-provider registry, and project state. No imports from Office 2.0 or VelvetOS. Future integration is an OPTIONAL adapter over documented API after product validation.
 

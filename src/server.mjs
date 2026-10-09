@@ -4,10 +4,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { scanOllama } from "./ollama.mjs";
 import { PROVIDER_CATALOG } from "./providers.mjs";
+import { randomUUID } from "node:crypto";
+import { runPilotAgent } from "./agent/local-agent.mjs";
+import { diffLines } from "./agent/diff.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = 4178;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
+const PROJECT_ROOT = path.resolve(ROOT, "..");
+let agentActive = false;
 
 function json(res, status, data) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
@@ -43,7 +48,44 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { cloudEnabled: false, catalog: PROVIDER_CATALOG, instances: await scanOllama() });
     }
     if (req.method === "GET" && req.url === "/api/health") {
-      return json(res, 200, { name: "ai-development-studio", version: "0.0.1", cloudEnabled: false, status: "prototype" });
+      return json(res, 200, { name: "ai-development-studio", version: "0.0.3", cloudEnabled: false, status: "prototype" });
+    }
+    if (req.method === "POST" && req.url === "/api/agent/demo") {
+      const input = await bodyJson(req);
+      if (typeof input.model !== "string" || typeof input.baseUrl !== "string") {
+        return json(res, 400, { error: "invalid-agent-request" });
+      }
+      const instances = await scanOllama();
+      const instance = instances.find(x => x.baseUrl === input.baseUrl && x.models.some(m => m.id === input.model));
+      if (!instance) return json(res, 400, { error: "local-model-not-found" });
+      if (agentActive) return json(res, 409, { error: "agent-busy" });
+      agentActive = true;
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-store", "Connection": "keep-alive",
+        "X-Content-Type-Options": "nosniff"
+      });
+      const emit = (type, data) => {
+        if (!res.writableEnded && !res.destroyed) res.write("event: " + type + "\n" + "data: " + JSON.stringify(data) + "\n\n");
+      };
+      emit("start", { kind: "static-html-pilot", model: input.model });
+      try {
+        const workspace = path.join(PROJECT_ROOT, ".pilot-workspace", "browser-" + Date.now() + "-" + randomUUID().slice(0, 8));
+        const result = await runPilotAgent({
+          workspace, model: input.model, baseUrl: input.baseUrl,
+          maxSteps: 7, onEvent: event => emit("progress", event)
+        });
+        emit("done", {
+          ok: result.ok, summary: result.summary, check: result.check,
+          diff: diffLines(result.before, result.after), events: result.events
+        });
+      } catch (error) {
+        emit("agent-error", { error: error?.name === "TimeoutError" ? "model-timeout" : "agent-failed" });
+      } finally {
+        agentActive = false;
+        res.end();
+      }
+      return;
     }
     if (req.method === "POST" && req.url === "/api/chat") {
       const input = await bodyJson(req);
