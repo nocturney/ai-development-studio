@@ -32,7 +32,11 @@ textarea{border:none;resize:vertical;min-height:62px;max-height:210px;outline:no
 .tag{display:inline-block;padding:4px 7px;border:1px solid #384150;border-radius:6px;font-size:11px;margin:4px 2px}
 hr{border:0;border-top:1px solid #2b323c;margin:25px 0}
 .agentbar{padding:12px 32px;background:#1a2130;border-bottom:1px solid #333d4d;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-#agentDemo{background:#2c466a;border-color:#6483b0;font-weight:600;font-size:13px}
+#agentDemo,#reviewDemo{background:#2c466a;border-color:#6483b0;font-weight:600;font-size:13px}
+.review-actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 14px}
+.review-actions button{font-size:12px}
+#discardReview{border-color:#8b5356;color:#f2c4c6}
+#reviewBranch{font-size:11px;color:#b5c6e8;overflow-wrap:anywhere;margin:6px 0}
 .agentbar span{font-size:12px;color:#b3bfd2}
 #agentResult{padding:18px 32px;background:#141b24;border-bottom:1px solid #303947;max-height:40vh;overflow:auto}
 #agentResult[hidden]{display:none}
@@ -57,9 +61,12 @@ hr{border:0;border-top:1px solid #2b323c;margin:25px 0}
 <main><header><div><h1>Local model workspace</h1><small>Prototype · local chat + limited tool-using agent</small></div>
 <div><select id="model" aria-label="Choose a local model"><option>Scanning local models...</option></select>
 <button id="refresh" title="Refresh local models">↻</button></div></header>
-<section class="agentbar"><button id="agentDemo" disabled>Run safe agent demo</button>
-<span id="agentState">Static HTML pilot: reads, edits, checks and displays a diff. No shell execution.</span></section>
-<section id="agentResult" hidden><h2 id="agentOutcome">Agent pilot</h2><div id="agentTrace"></div>
+<section class="agentbar"><button id="agentDemo" disabled>One-file demo</button><button id="reviewDemo" disabled>Run two-file worktree demo</button><select id="reviewList" aria-label="Previous agent reviews"><option>Review history...</option></select><button id="reloadReviews" title="Refresh reviews">↻</button>
+<span id="agentState">Safe local agent tools only. No shell execution, cloud models or changes to main.</span></section>
+<section id="agentResult" hidden><h2 id="agentOutcome">Agent pilot</h2>
+<div id="reviewBranch"></div><div id="reviewActions" class="review-actions" hidden>
+<button id="approveReview" disabled>Approve &amp; commit pilot branch</button><button id="discardReview" disabled>Discard / rollback pilot</button>
+</div><div id="agentTrace"></div>
 <pre id="agentDiff" aria-label="Agent file diff"></pre></section>
 <section id="chat" class="chat"><div class="welcome" id="welcome"><h2>Build on your own hardware.</h2><p>This is the first independent local-first studio prototype. Chat uses your existing Ollama instance; remote providers are disabled.</p></div></section>
 <div class="compose"><div class="composer"><textarea id="prompt" placeholder="Ask your local model a question..." aria-label="Prompt"></textarea><button id="send">Send</button></div>
@@ -73,6 +80,9 @@ const modelSelect=document.getElementById("model"),chat=document.getElementById(
 const messages=[];
 const agentDemo=document.getElementById("agentDemo"),agentState=document.getElementById("agentState"),agentResult=document.getElementById("agentResult"),agentTrace=document.getElementById("agentTrace"),agentDiff=document.getElementById("agentDiff"),agentOutcome=document.getElementById("agentOutcome");
 let agentIsRunning=false;
+const reviewDemo=document.getElementById("reviewDemo"),reviewActions=document.getElementById("reviewActions"),approveReview=document.getElementById("approveReview"),discardReview=document.getElementById("discardReview"),reviewBranch=document.getElementById("reviewBranch");
+let currentReview=null;
+const reviewList=document.getElementById("reviewList"),reloadReviews=document.getElementById("reloadReviews");
 async function loadModels(){
  modelSelect.replaceChildren();status.textContent="Scanning Ollama on localhost...";
  try{
@@ -88,6 +98,7 @@ async function loadModels(){
   if(!modelSelect.options.length){const option=document.createElement("option");option.textContent="No local models found";modelSelect.appendChild(option)}
   send.disabled=!data.instances.length || agentIsRunning;
   agentDemo.disabled=!data.instances.length || agentIsRunning;
+  reviewDemo.disabled=!data.instances.length || agentIsRunning;
   status.textContent=data.instances.length+" local Ollama instance(s) connected. Cloud providers disabled.";
  }catch(e){send.disabled=true;status.textContent="Could not scan local Ollama."}
 }
@@ -111,7 +122,8 @@ async function submit(){
 async function runAgentDemo(){
  if(agentIsRunning || !modelSelect.value.startsWith("{"))return;
  const selected=JSON.parse(modelSelect.value);
- agentIsRunning=true;agentDemo.disabled=true;send.disabled=true;
+ agentIsRunning=true;agentDemo.disabled=true;reviewDemo.disabled=true;send.disabled=true;
+ reviewActions.hidden=true;reviewBranch.textContent="";
  agentResult.hidden=false;agentOutcome.textContent="Agent pilot running...";
  agentTrace.textContent="Starting local agent. Static HTML only; no shell execution.\n";
  agentDiff.replaceChildren();
@@ -169,14 +181,146 @@ async function runAgentDemo(){
   agentTrace.textContent+="Error: "+error.message+"\n";
   agentState.textContent="Agent stopped without a complete result. No cloud fallback.";
  }finally{
-  agentIsRunning=false;agentDemo.disabled=false;send.disabled=false;
+  agentIsRunning=false;agentDemo.disabled=false;reviewDemo.disabled=false;send.disabled=false;
  }
 }
 agentDemo.addEventListener("click",runAgentDemo);
+function showReview(review,diff){
+ currentReview=review;
+ agentResult.hidden=false;
+ reviewActions.hidden=false;
+ reviewBranch.textContent="Isolated branch: "+review.branch+" · status: "+review.status;
+ agentOutcome.textContent=review.status==="pending"?"Ready for human review":
+  review.status==="approved"?"Approved on pilot branch":
+  review.status==="rejected"?"Pilot worktree discarded":"Pilot needs attention";
+ approveReview.disabled=review.status!=="pending" || agentIsRunning;
+ discardReview.disabled=!["pending","failed","approved"].includes(review.status) || agentIsRunning;
+ if(typeof diff==="string")agentDiff.textContent=diff;
+}
+async function loadLatestReview(preferredId){
+ try{
+  const response=await fetch("/api/agent/reviews");
+  if(!response.ok)return;
+  const data=await response.json();
+  const reviews=data.reviews.filter(item=>["pending","approved","failed"].includes(item.status));
+  reviewList.replaceChildren();
+  for(const item of reviews.slice(0,25)){
+   const option=document.createElement("option");option.value=item.id;
+   option.textContent=item.status+" · "+item.id.slice(0,8)+" · "+new Date(item.createdAt).toLocaleString();
+   reviewList.appendChild(option);
+  }
+  if(!reviews.length){
+   const option=document.createElement("option");option.textContent="No saved reviews";
+   reviewList.appendChild(option);reviewList.disabled=true;return;
+  }
+  reviewList.disabled=false;
+  const review=reviews.find(item=>item.id===preferredId)||reviews[0];
+  reviewList.value=review.id;
+  const detail=await fetch("/api/agent/reviews/diff?id="+encodeURIComponent(review.id));
+  if(!detail.ok)return;
+  const result=await detail.json();
+  showReview(result.review,result.diff);
+  agentTrace.textContent="Recovered saved review. Inspect the changes before taking action.\n";
+ }catch{
+  agentState.textContent="Review history could not be loaded. Local chat remains available.";
+ }
+}
+async function runReviewDemo(){
+ if(agentIsRunning||!modelSelect.value.startsWith("{"))return;
+ const selected=JSON.parse(modelSelect.value);
+ agentIsRunning=true;reviewDemo.disabled=true;agentDemo.disabled=true;send.disabled=true;
+ reviewActions.hidden=true;currentReview=null;reviewBranch.textContent="";
+ agentResult.hidden=false;agentOutcome.textContent="Two-file Git worktree pilot running...";
+ agentTrace.textContent="Creating isolated branch and editing two files. No shell or automatic commits.\n";
+ agentDiff.textContent="";
+ agentState.textContent="Local Qwen model operating on isolated worktree...";
+ let finished=false;
+ try{
+  const response=await fetch("/api/agent/review-demo",{
+   method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(selected)
+  });
+  if(!response.ok){
+   const data=await response.json().catch(()=>({}));
+   throw Error(data.error||"Review pilot request was rejected");
+  }
+  if(!response.body)throw Error("Event stream not supported");
+  const reader=response.body.getReader(),decoder=new TextDecoder();
+  let buffer="";
+  const onEvent=raw=>{
+   const lines=raw.split("\n");
+   const event=lines.find(line=>line.startsWith("event: "))?.slice(7);
+   const dataText=lines.find(line=>line.startsWith("data: "))?.slice(6);
+   if(!event||!dataText)return;
+   const data=JSON.parse(dataText);
+   if(event==="progress"){
+    if(data.kind==="review-created"){
+     reviewBranch.textContent="Isolated branch: "+data.branch;
+     agentTrace.textContent+="Created Git worktree: "+data.id+"\n";
+    }else if(data.kind==="tool"){
+     agentTrace.textContent+="Step "+data.step+" · "+data.tool+" · "+(data.ok?"OK":"REJECTED")+"\n";
+     agentState.textContent="Tool: "+data.tool;
+    }
+   }else if(event==="done"){
+    finished=true;
+    showReview(data.review,data.diff);
+    agentTrace.textContent+=data.summary+"\n";
+    agentTrace.textContent+="Static checks: "+(data.checks?.checks??[]).map(x=>x.name+" "+(x.pass?"✓":"✗")).join(" · ")+"\n";
+    agentState.textContent=data.ok?"Changes ready for explicit review. Main was not modified.":"Pilot failed; changes remain isolated.";
+   }else if(event==="agent-error"){
+    throw Error(data.error||"Agent execution error");
+   }
+  };
+  while(true){
+   const {done,value}=await reader.read();if(done)break;
+   buffer+=decoder.decode(value,{stream:true});
+   let end;
+   while((end=buffer.indexOf("\n\n"))!==-1){
+    const raw=buffer.slice(0,end);buffer=buffer.slice(end+2);onEvent(raw);
+   }
+  }
+  if(!finished)throw Error("Agent stream ended before final result");
+ }catch(error){
+  agentOutcome.textContent="Review pilot was interrupted";
+  agentTrace.textContent+="Error: "+error.message+"\n";
+  agentState.textContent="No commit was made. Refresh to inspect any saved review.";
+ }finally{
+  agentIsRunning=false;reviewDemo.disabled=false;agentDemo.disabled=false;send.disabled=false;
+  if(currentReview){showReview(currentReview);loadLatestReview(currentReview.id);}
+ }
+}
+async function actOnReview(action){
+ if(!currentReview||agentIsRunning)return;
+ if(action==="approve"&&currentReview.status!=="pending")return;
+ if(action==="discard"&&!["pending","approved","failed"].includes(currentReview.status))return;
+ approveReview.disabled=true;discardReview.disabled=true;
+ try{
+  const response=await fetch("/api/agent/reviews/action",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({id:currentReview.id,action})
+  });
+  const data=await response.json();
+  if(!response.ok)throw Error(data.error||"Review action rejected");
+  showReview(data.review,action==="discard"?"Worktree and pilot branch deleted. Original main branch unchanged.":undefined);
+  agentTrace.textContent+=action==="approve"?
+   "Approved. Commit "+data.review.commit+" exists only on the pilot branch. Main not merged.\n":
+   "Discarded and rolled back the isolated pilot worktree.\n";
+  agentState.textContent=action==="approve"?"Pilot commit approved (not merged).":"Pilot discarded. Main unchanged.";
+  await loadLatestReview(action==="approve"?data.review.id:undefined);
+ }catch(error){
+  agentTrace.textContent+="Action failed: "+error.message+"\n";
+  if(currentReview)showReview(currentReview);
+ }
+}
+reviewDemo.addEventListener("click",runReviewDemo);
+reviewList.addEventListener("change",()=>loadLatestReview(reviewList.value));
+reloadReviews.addEventListener("click",()=>loadLatestReview(reviewList.value));
+approveReview.addEventListener("click",()=>actOnReview("approve"));
+discardReview.addEventListener("click",()=>actOnReview("discard"));
 send.addEventListener("click",submit);
 prompt.addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();submit()}});
 document.getElementById("refresh").addEventListener("click",loadModels);
 loadModels();
+loadLatestReview();
 </script>
 </body>
 </html>

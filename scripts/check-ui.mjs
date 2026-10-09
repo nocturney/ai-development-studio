@@ -8,7 +8,7 @@ const html = await fs.readFile(filename, "utf8");
 const match = html.match(/<script>([\s\S]*?)<\/script>/);
 if (!match) throw Error("missing UI script");
 new vm.Script(match[1], { filename: "public/index.html" });
-if (!html.includes('id="agentDemo"') || !html.includes('id="agentDiff"')) {
+if (!["agentDemo", "agentDiff", "reviewDemo", "approveReview", "discardReview"].every(id => html.includes('id="' + id + '"'))) {
   throw Error("agent demo controls missing");
 }
 console.log("UI script syntax and required demo controls OK");

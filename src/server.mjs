@@ -7,12 +7,16 @@ import { PROVIDER_CATALOG } from "./providers.mjs";
 import { randomUUID } from "node:crypto";
 import { runPilotAgent } from "./agent/local-agent.mjs";
 import { diffLines } from "./agent/diff.mjs";
+import { ReviewStore } from "./agent/review-store.mjs";
+import { runReviewAgent } from "./agent/review-agent.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = 4178;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
 const PROJECT_ROOT = path.resolve(ROOT, "..");
+const reviewStore = new ReviewStore(PROJECT_ROOT);
 let agentActive = false;
+let reviewActionActive = false;
 
 function json(res, status, data) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
@@ -41,14 +45,91 @@ const server = http.createServer(async (req, res) => {
   if (!secure(req, res)) return;
   try {
     if (req.method === "GET" && req.url === "/") {
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
+        "Referrer-Policy": "no-referrer",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+      });
       return res.end(await fs.readFile(path.join(ROOT, "index.html")));
     }
     if (req.method === "GET" && req.url === "/api/providers") {
       return json(res, 200, { cloudEnabled: false, catalog: PROVIDER_CATALOG, instances: await scanOllama() });
     }
     if (req.method === "GET" && req.url === "/api/health") {
-      return json(res, 200, { name: "ai-development-studio", version: "0.0.3", cloudEnabled: false, status: "prototype" });
+      return json(res, 200, { name: "ai-development-studio", version: "0.0.4", cloudEnabled: false, status: "prototype" });
+    }
+    if (req.method === "GET" && req.url === "/api/agent/reviews") {
+      const reviews = await reviewStore.list();
+      return json(res, 200, { reviews });
+    }
+    if (req.method === "GET" && req.url.startsWith("/api/agent/reviews/diff?")) {
+      const id = new URL(req.url, "http://127.0.0.1").searchParams.get("id");
+      try {
+        const review = await reviewStore.get(id);
+        return json(res, 200, { review: reviewStore.publicReview(review), diff: await reviewStore.diff(id) });
+      } catch {
+        return json(res, 404, { error: "review-not-available" });
+      }
+    }
+    if (req.method === "POST" && req.url === "/api/agent/reviews/action") {
+      const input = await bodyJson(req);
+      if (agentActive || reviewActionActive) return json(res, 409, { error: "review-action-busy" });
+      if (!input || !["approve", "discard"].includes(input.action)) {
+        return json(res, 400, { error: "invalid-review-action" });
+      }
+      reviewActionActive = true;
+      try {
+        const review = input.action === "approve" ?
+          await reviewStore.approve(input.id) : await reviewStore.discard(input.id);
+        return json(res, 200, { review });
+      } catch {
+        return json(res, 409, { error: "review-action-not-available-or-changed" });
+      } finally {
+        reviewActionActive = false;
+      }
+    }
+    if (req.method === "POST" && req.url === "/api/agent/review-demo") {
+      const input = await bodyJson(req);
+      if (typeof input.model !== "string" || typeof input.baseUrl !== "string") {
+        return json(res, 400, { error: "invalid-model-selection" });
+      }
+      const instances = await scanOllama();
+      if (!instances.some(instance => instance.baseUrl === input.baseUrl &&
+          instance.models.some(model => model.id === input.model))) {
+        return json(res, 400, { error: "local-model-not-found" });
+      }
+      if (agentActive) return json(res, 409, { error: "agent-currently-running" });
+      agentActive = true;
+      const abort = new AbortController();
+      res.on("close", () => abort.abort());
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-store", Connection: "keep-alive",
+        "X-Content-Type-Options": "nosniff"
+      });
+      const emit = (type, data) => {
+        if (!res.destroyed && !res.writableEnded) {
+          res.write("event: " + type + "\n" + "data: " + JSON.stringify(data) + "\n\n");
+        }
+      };
+      emit("start", { kind: "two-file-git-worktree", model: input.model });
+      try {
+        const result = await runReviewAgent({
+          store: reviewStore, model: input.model, baseUrl: input.baseUrl,
+          maxSteps: 12, signal: abort.signal, onEvent: event => emit("progress", event)
+        });
+        emit("done", {
+          ok: result.ok, review: result.review, summary: result.summary,
+          checks: result.checks, diff: result.diff
+        });
+      } catch {
+        emit("agent-error", { error: abort.signal.aborted ? "agent-cancelled" : "agent-execution-failed" });
+      } finally {
+        agentActive = false;
+        res.end();
+      }
+      return;
     }
     if (req.method === "POST" && req.url === "/api/agent/demo") {
       const input = await bodyJson(req);
