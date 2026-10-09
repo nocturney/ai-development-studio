@@ -9,6 +9,7 @@ import { runPilotAgent } from "./agent/local-agent.mjs";
 import { diffLines } from "./agent/diff.mjs";
 import { ReviewStore } from "./agent/review-store.mjs";
 import { runReviewAgent } from "./agent/review-agent.mjs";
+import { PREVIEW_CSP, buildStaticPreview } from "./preview.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = 4178;
@@ -49,7 +50,7 @@ const server = http.createServer(async (req, res) => {
         "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
         "Referrer-Policy": "no-referrer",
-        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-src 'self'; img-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
       });
       return res.end(await fs.readFile(path.join(ROOT, "index.html")));
     }
@@ -70,6 +71,29 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, { review: reviewStore.publicReview(review), diff: await reviewStore.diff(id) });
       } catch {
         return json(res, 404, { error: "review-not-available" });
+      }
+    }
+    if (req.method === "GET" && req.url.startsWith("/api/agent/reviews/preview?")) {
+      const id = new URL(req.url, "http://127.0.0.1").searchParams.get("id");
+      try {
+        const item = await reviewStore.get(id);
+        if (!["pending", "approved"].includes(item.status)) {
+          return json(res, 409, { error: "preview-requires-valid-review" });
+        }
+        if (!item.fingerprint || await reviewStore.fingerprint(id) !== item.fingerprint) {
+          return json(res, 409, { error: "preview-review-content-changed" });
+        }
+        const html = buildStaticPreview(await reviewStore.inspect(id));
+        res.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Content-Security-Policy": PREVIEW_CSP,
+          "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+          "Referrer-Policy": "no-referrer",
+          "Cross-Origin-Resource-Policy": "same-origin"
+        });
+        return res.end(html);
+      } catch {
+        return json(res, 409, { error: "preview-invalid-or-unavailable" });
       }
     }
     if (req.method === "POST" && req.url === "/api/agent/reviews/action") {
