@@ -13,6 +13,7 @@ import { promisify } from "node:util";
 import { performance } from "node:perf_hooks";
 import { diagnoseSandbox } from "./windows.mjs";
 import { parseUntrustedRunnerResult, verifyPreparedOfflineRunnerJob } from "./offline-runner.mjs";
+import { VmOwnershipJournal } from "./vm-journal.mjs";
 
 const execFileAsync = promisify(execFile);
 const VM_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -138,10 +139,13 @@ export async function runWindowsVmJob({
   reportReader = readGuestReport,
   wait = delayWithSignal, now = () => performance.now(),
   vmId = randomUUID(), pollMs = 1000, startupGraceMs = 90000,
-  onEvent = () => {}
+  journal = null, onEvent = () => {}
 }) {
   if (!executionOptIn || !interactiveConfirmation || approval !== expectedVmApproval(staged)) {
     throw Error("explicit-vm-approval-required");
+  }
+  if (!(journal instanceof VmOwnershipJournal)) {
+    throw Error("vm-ownership-journal-required");
   }
   if (!VM_ID_RE.test(vmId) ||
       !Number.isInteger(pollMs) || pollMs < 100 || pollMs > 10000 ||
@@ -179,16 +183,24 @@ export async function runWindowsVmJob({
   const config = await fs.readFile(configPath, "utf8");
   const maxMs = startupGraceMs + staged.manifest.timeoutSeconds * 1000;
   const startAt = now();
-  let attempted = false, result = null, primaryError = null, stopError = null;
+  let attempted = false, journalClaimed = false, result = null;
+  let primaryError = null, stopError = null, journalError = null;
   const emit = event => {
     try { onEvent(event); } catch { /* observability cannot block VM cleanup */ }
   };
   try {
+    if (journal) {
+      await journal.claim({ vmId, jobId: staged.id, manifestHash: staged.manifestHash });
+      journalClaimed = true;
+      await journal.transition(vmId, "launch-requested");
+    }
+    signal?.throwIfAborted();
     attempted = true;
     emit({ stage: "starting", vmId, jobId: staged.id });
     await vmCommand(ready.executable, [
       "start", "--id", vmId, "--config", config
     ], { timeout: 60000, windowsHide: true, maxBuffer: 20000, signal });
+    if (journal) await journal.transition(vmId, "running");
     emit({ stage: "running", vmId, jobId: staged.id });
     while (now() - startAt < maxMs) {
       signal?.throwIfAborted();
@@ -209,18 +221,41 @@ export async function runWindowsVmJob({
   } finally {
     if (attempted) {
       emit({ stage: "stopping", vmId, jobId: staged.id });
+      if (journalClaimed) {
+        try { await journal.transition(vmId, "stopping"); }
+        catch (error) { journalError = error; }
+      }
+      let stopped = false;
       try {
         await vmCommand(ready.executable, ["stop", "--id", vmId], {
           timeout: 25000, windowsHide: true, maxBuffer: 20000
         });
+        stopped = true;
         emit({ stage: "stopped", vmId, jobId: staged.id });
       } catch (error) {
         stopError = Error("vm-stop-not-confirmed; inspect session " + vmId + " manually", { cause: error });
       }
+      if (journalClaimed) {
+        try {
+          if (stopped) {
+            await journal.transition(vmId, "stopped");
+            await journal.releaseStopped(vmId);
+          } else {
+            await journal.transition(vmId, "stop-unverified");
+          }
+        } catch (error) { journalError = error; }
+      }
+    } else if (journalClaimed) {
+      // No VM launch was attempted. Clear the reservation only after the
+      // journal has recorded that no VM still needs to be stopped.
+      try {
+        await journal.transition(vmId, "stopped");
+        await journal.releaseStopped(vmId);
+      } catch (error) { journalError = error; }
     }
   }
-  if (primaryError && stopError) throw new AggregateError([primaryError, stopError], "vm-failed-and-stop-unverified");
-  if (stopError) throw stopError;
-  if (primaryError) throw primaryError;
+  const errors = [primaryError, stopError, journalError].filter(Boolean);
+  if (errors.length > 1) throw new AggregateError(errors, "vm-lifecycle-or-ownership-error");
+  if (errors.length === 1) throw errors[0];
   return { ...result, sandboxStopped: true, requiresHumanReview: true };
 }
