@@ -1,17 +1,46 @@
 # AI Development Studio (working title)
 
-Standalone, local-first development studio. No Office 2.0 runtime or repository dependency.
+Standalone, local-first AI development studio. Independent repository, runtime and release cycle; **not an Office 2.0 component**.
 
-Status: v0.0.3 local-chat prototype with a narrow, verified, tool-using HTML demo agent. Not yet a general code-editing agent or full app builder.
+**Current build: v0.0.4 research prototype.** Local model chat plus two independently verified, narrow coding-agent pilots. This is **not** a general-purpose Dyad replacement or an unrestricted developer agent.
 
-Goals:
-- No application-imposed message quotas.
-- Existing Ollama as local default.
-- Explicit user opt-in for each remote model provider.
-- No paid inference or remote transfer without clear authorization.
-- Local model discovery, model routing, and tested policy checks.
-- Next: standalone desktop UI, code agent, live preview, Git, and packaging.
+## Running the Windows pilot
 
-Run `npm test`, `npm run scan`, `npm run agent:pilot`, or `npm start` from this project. The local-only web UI at http://127.0.0.1:4178 has a safe Agent Demo button and progress/diff view. No arbitrary shell commands or project-wide edits are available.
+Requires Node.js 22+, Git and the existing Ollama server listening on the configured loopback port.
 
-Project-specific configuration and credentials must never be committed.
+```sh
+npm test
+npm run scan
+npm start
+```
+
+Open http://127.0.0.1:4178 on the **same machine**. The app only binds to 127.0.0.1.
+
+## What to try
+
+- **Local chat:** choose a discovered Ollama model and send a prompt.
+- **One-file demo:** restricted HTML editing and static checks, with progress and diff.
+- **Two-file worktree demo:** the local model reads index.html and styles.css, edits both, and runs ten static checks.
+- **Human review:** inspect its Git diff; approve a commit on the isolated pilot branch or discard the review worktree. Nothing is merged into main.
+- **Restart persistence:** unapproved/approved pilot reviews can be reloaded after restarting the app.
+
+No implicit cloud model access, API keys, tokens, subscriptions or app-enforced message quotas. The cloud provider catalog remains disabled and is only for future research.
+
+## Local model smoke tests
+
+```sh
+node scripts/manual-tool-smoke.mjs
+node scripts/manual-review-pilot.mjs
+node scripts/manual-review-action-api-smoke.mjs
+node scripts/manual-review-sse.mjs
+```
+
+The scripts that run a model are slow and deliberately create local pilot review data. Read [review-worktrees.md](docs/review-worktrees.md) before using them.
+
+## Safety and limitations
+
+The model can only edit explicit pilot files in an ignored local test directory. The review engine uses Git worktrees for branching, but **Git worktrees do not sandbox code execution**. Arbitrary Shell access, package installation, user-project file editing, network access from the agent, running generated code and remote model selection remain disabled.
+
+Full sandboxed agent execution, multi-project support, visual editor/preview, Windows/macOS packaging, and optional cloud providers are future phases. No integration with Office 2.0 until independently validated.
+
+See [Architecture](docs/architecture.md), [Worktree Review](docs/review-worktrees.md), and [Provider Research](docs/providers.md).
