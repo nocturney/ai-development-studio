@@ -12,6 +12,7 @@ import { runReviewAgent } from "./agent/review-agent.mjs";
 import { PREVIEW_CSP, buildStaticPreview } from "./preview.mjs";
 import { diagnoseSandbox } from "./sandbox/windows.mjs";
 import { validateLocalChatSelection, streamLocalChat } from "./streaming/ollama-chat.mjs";
+import { ReadonlyProjectCatalog } from "./projects/catalog.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.STUDIO_PORT ?? 4178);
@@ -19,6 +20,7 @@ if (!Number.isInteger(PORT) || PORT < 1024 || PORT > 65535) throw Error("invalid
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
 const PROJECT_ROOT = path.resolve(ROOT, "..");
 const reviewStore = new ReviewStore(PROJECT_ROOT, { dataRoot: process.env.STUDIO_DATA_ROOT });
+const projectCatalog = new ReadonlyProjectCatalog(process.env.STUDIO_PROJECTS_ROOT ?? null);
 let agentActive = false;
 let reviewActionActive = false;
 let activeReviewRun = null;
@@ -59,11 +61,33 @@ const server = http.createServer(async (req, res) => {
       });
       return res.end(await fs.readFile(path.join(ROOT, "index.html")));
     }
+    if (req.method === "GET" && req.url === "/api/projects") {
+      return json(res, 200, await projectCatalog.list());
+    }
+    if (req.method === "GET" && req.url.startsWith("/api/projects/files?")) {
+      try {
+        const query = new URL(req.url, "http://localhost");
+        return json(res, 200, await projectCatalog.listFiles(query.searchParams.get("project")));
+      } catch {
+        return json(res, 400, { error: "project-not-readable" });
+      }
+    }
+    if (req.method === "GET" && req.url.startsWith("/api/projects/file?")) {
+      try {
+        const query = new URL(req.url, "http://localhost");
+        const data = await projectCatalog.readText(
+          query.searchParams.get("project"), query.searchParams.get("path")
+        );
+        return json(res, 200, data);
+      } catch {
+        return json(res, 400, { error: "project-file-not-readable" });
+      }
+    }
     if (req.method === "GET" && req.url === "/api/providers") {
       return json(res, 200, { cloudEnabled: false, catalog: PROVIDER_CATALOG, instances: await scanOllama() });
     }
     if (req.method === "GET" && req.url === "/api/health") {
-      return json(res, 200, { name: "ai-development-studio", version: "0.0.7", cloudEnabled: false, status: "prototype", storageMode: reviewStore.storageMode });
+      return json(res, 200, { name: "ai-development-studio", version: "0.0.8", cloudEnabled: false, status: "prototype", storageMode: reviewStore.storageMode });
     }
     if (req.method === "GET" && req.url === "/api/sandbox/diagnostic") {
       const state = await diagnoseSandbox();
