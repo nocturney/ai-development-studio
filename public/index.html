@@ -35,7 +35,7 @@ hr{border:0;border-top:1px solid #2b323c;margin:25px 0}
 #agentDemo,#reviewDemo{background:#2c466a;border-color:#6483b0;font-weight:600;font-size:13px}
 .review-actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 14px}
 .review-actions button{font-size:12px}
-#discardReview{border-color:#8b5356;color:#f2c4c6}
+#discardReview,#cancelReview{border-color:#8b5356;color:#f2c4c6}
 #reviewBranch{font-size:11px;color:#b5c6e8;overflow-wrap:anywhere;margin:6px 0}
 .agentbar span{font-size:12px;color:#b3bfd2}
 #agentResult{padding:18px 32px;background:#141b24;border-bottom:1px solid #303947;max-height:40vh;overflow:auto}
@@ -61,7 +61,7 @@ hr{border:0;border-top:1px solid #2b323c;margin:25px 0}
 <main><header><div><h1>Local model workspace</h1><small>Prototype · local chat + limited tool-using agent</small></div>
 <div><select id="model" aria-label="Choose a local model"><option>Scanning local models...</option></select>
 <button id="refresh" title="Refresh local models">↻</button></div></header>
-<section class="agentbar"><button id="agentDemo" disabled>One-file demo</button><button id="reviewDemo" disabled>Run two-file worktree demo</button><select id="reviewList" aria-label="Previous agent reviews"><option>Review history...</option></select><button id="reloadReviews" title="Refresh reviews">↻</button>
+<section class="agentbar"><button id="agentDemo" disabled>One-file demo</button><button id="reviewDemo" disabled>Run two-file worktree demo</button><button id="cancelReview" disabled>Cancel current run</button><select id="reviewList" aria-label="Previous agent reviews"><option>Review history...</option></select><button id="reloadReviews" title="Refresh reviews">↻</button>
 <span id="agentState">Safe local agent tools only. No shell execution, cloud models or changes to main.</span></section>
 <section id="agentResult" hidden><h2 id="agentOutcome">Agent pilot</h2>
 <div id="reviewBranch"></div><div id="reviewActions" class="review-actions" hidden>
@@ -82,7 +82,8 @@ const agentDemo=document.getElementById("agentDemo"),agentState=document.getElem
 let agentIsRunning=false;
 const reviewDemo=document.getElementById("reviewDemo"),reviewActions=document.getElementById("reviewActions"),approveReview=document.getElementById("approveReview"),discardReview=document.getElementById("discardReview"),reviewBranch=document.getElementById("reviewBranch");
 let currentReview=null;
-const reviewList=document.getElementById("reviewList"),reloadReviews=document.getElementById("reloadReviews");
+const reviewList=document.getElementById("reviewList"),reloadReviews=document.getElementById("reloadReviews"),cancelReview=document.getElementById("cancelReview");
+let currentRunId=null;
 async function loadModels(){
  modelSelect.replaceChildren();status.textContent="Scanning Ollama on localhost...";
  try{
@@ -229,6 +230,7 @@ async function runReviewDemo(){
  if(agentIsRunning||!modelSelect.value.startsWith("{"))return;
  const selected=JSON.parse(modelSelect.value);
  agentIsRunning=true;reviewDemo.disabled=true;agentDemo.disabled=true;send.disabled=true;
+ cancelReview.disabled=true;currentRunId=null;
  reviewActions.hidden=true;currentReview=null;reviewBranch.textContent="";
  agentResult.hidden=false;agentOutcome.textContent="Two-file Git worktree pilot running...";
  agentTrace.textContent="Creating isolated branch and editing two files. No shell or automatic commits.\n";
@@ -252,7 +254,10 @@ async function runReviewDemo(){
    const dataText=lines.find(line=>line.startsWith("data: "))?.slice(6);
    if(!event||!dataText)return;
    const data=JSON.parse(dataText);
-   if(event==="progress"){
+   if(event==="start"){
+    currentRunId=data.runId;
+    cancelReview.disabled=!currentRunId;
+   }else if(event==="progress"){
     if(data.kind==="review-created"){
      reviewBranch.textContent="Isolated branch: "+data.branch;
      agentTrace.textContent+="Created Git worktree: "+data.id+"\n";
@@ -285,7 +290,9 @@ async function runReviewDemo(){
   agentState.textContent="No commit was made. Refresh to inspect any saved review.";
  }finally{
   agentIsRunning=false;reviewDemo.disabled=false;agentDemo.disabled=false;send.disabled=false;
+  cancelReview.disabled=true;currentRunId=null;
   if(currentReview){showReview(currentReview);loadLatestReview(currentReview.id);}
+  else await loadLatestReview();
  }
 }
 async function actOnReview(action){
@@ -311,6 +318,25 @@ async function actOnReview(action){
   if(currentReview)showReview(currentReview);
  }
 }
+async function requestAgentCancellation(){
+ if(!agentIsRunning || !currentRunId)return;
+ cancelReview.disabled=true;
+ agentState.textContent="Sending cancellation request...";
+ try{
+  const response=await fetch("/api/agent/review-demo/cancel",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({runId:currentRunId})
+  });
+  const data=await response.json();
+  if(!response.ok || !data.cancellationRequested)throw Error(data.error||"Cancel failed");
+  agentTrace.textContent+="Cancellation requested by user. Worktree remains for review/discard.\n";
+  agentState.textContent="Cancelling the local agent...";
+ }catch(error){
+  agentTrace.textContent+="Cancel request failed: "+error.message+"\n";
+  cancelReview.disabled=false;
+ }
+}
+cancelReview.addEventListener("click",requestAgentCancellation);
 reviewDemo.addEventListener("click",runReviewDemo);
 reviewList.addEventListener("change",()=>loadLatestReview(reviewList.value));
 reloadReviews.addEventListener("click",()=>loadLatestReview(reviewList.value));
