@@ -13,6 +13,7 @@ import { PREVIEW_CSP, buildStaticPreview } from "./preview.mjs";
 import { diagnoseSandbox } from "./sandbox/windows.mjs";
 import { validateLocalChatSelection, streamLocalChat } from "./streaming/ollama-chat.mjs";
 import { ReadonlyProjectCatalog } from "./projects/catalog.mjs";
+import { ProjectSnapshotManager } from "./projects/snapshots.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.STUDIO_PORT ?? 4178);
@@ -21,6 +22,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../publ
 const PROJECT_ROOT = path.resolve(ROOT, "..");
 const reviewStore = new ReviewStore(PROJECT_ROOT, { dataRoot: process.env.STUDIO_DATA_ROOT });
 const projectCatalog = new ReadonlyProjectCatalog(process.env.STUDIO_PROJECTS_ROOT ?? null);
+const snapshotManager = new ProjectSnapshotManager({ catalog: projectCatalog, storageRoot: reviewStore.base });
+let snapshotBusy = false;
 let agentActive = false;
 let reviewActionActive = false;
 let activeReviewRun = null;
@@ -64,6 +67,26 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && req.url === "/api/projects") {
       return json(res, 200, await projectCatalog.list());
     }
+    if (req.method === "GET" && req.url === "/api/projects/snapshots") {
+      if (!projectCatalog.enabled) return json(res, 200, { enabled: false, snapshots: [] });
+      return json(res, 200, { enabled: true, snapshots: await snapshotManager.list() });
+    }
+    if (req.method === "POST" && req.url === "/api/projects/snapshots") {
+      const input = await bodyJson(req);
+      if (!projectCatalog.enabled || typeof input?.project !== "string") {
+        return json(res, 400, { error: "snapshot-project-not-configured" });
+      }
+      if (snapshotBusy) return json(res, 409, { error: "snapshot-creation-busy" });
+      snapshotBusy = true;
+      try {
+        const snapshot = await snapshotManager.create(input.project);
+        return json(res, 201, { snapshot });
+      } catch {
+        return json(res, 400, { error: "snapshot-creation-failed" });
+      } finally {
+        snapshotBusy = false;
+      }
+    }
     if (req.method === "GET" && req.url.startsWith("/api/projects/files?")) {
       try {
         const query = new URL(req.url, "http://localhost");
@@ -87,7 +110,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { cloudEnabled: false, catalog: PROVIDER_CATALOG, instances: await scanOllama() });
     }
     if (req.method === "GET" && req.url === "/api/health") {
-      return json(res, 200, { name: "ai-development-studio", version: "0.0.8", cloudEnabled: false, status: "prototype", storageMode: reviewStore.storageMode });
+      return json(res, 200, { name: "ai-development-studio", version: "0.0.9", cloudEnabled: false, status: "prototype", storageMode: reviewStore.storageMode });
     }
     if (req.method === "GET" && req.url === "/api/sandbox/diagnostic") {
       const state = await diagnoseSandbox();

@@ -9,6 +9,8 @@ Prototype update (2026-10-09): v0.0.5 integrates the two-file review system with
 
 Prototype update (2026-10-09): v0.0.7 adds tested streamed local Ollama chat with cancellation and a prepared-only Windows Sandbox offline Node test contract; VM execution stays disabled. v0.0.8 adds an **opt-in read-only project catalog** scoped to a deliberately selected local root, with bounded file inspection, symlink and traversal denial, no editing, no shell and no remote model data transfer. The explicit read-only boundary lets us inspect real project structures before authorizing any future executable agent operations.
 
+Prototype update (2026-10-09): v0.0.9 adds explicit creation of a Git snapshot from a selected allowlisted project. The snapshot is stored in Studio data, not in the original project, and can later serve as an isolated branch/worktree baseline. Creating a snapshot does not execute user code, modify the original Git history, grant Agent permissions or transmit source to cloud providers.
+
 ## Isolation
 The studio has an independent repository, release lifecycle, settings, credentials, UI, model-provider registry, and project state. No imports from Office 2.0 or VelvetOS. Future integration is an OPTIONAL adapter over documented API after product validation.
 
