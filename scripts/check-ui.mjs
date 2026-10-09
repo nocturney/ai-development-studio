@@ -8,7 +8,7 @@ const html = await fs.readFile(filename, "utf8");
 const match = html.match(/<script>([\s\S]*?)<\/script>/);
 if (!match) throw Error("missing UI script");
 new vm.Script(match[1], { filename: "public/index.html" });
-if (!["agentDemo", "agentDiff", "reviewDemo", "cancelReview", "approveReview", "discardReview"].every(id => html.includes('id="' + id + '"'))) {
+if (!["agentDemo", "agentDiff", "reviewDemo", "cancelReview", "approveReview", "discardReview", "previewPanel", "previewFrame", "sandboxStatus"].every(id => html.includes('id="' + id + '"'))) {
   throw Error("agent demo controls missing");
 }
 if (!html.includes('"/api/agent/review-demo/cancel"')) throw Error("cancel endpoint not wired to UI");

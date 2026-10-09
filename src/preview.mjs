@@ -12,6 +12,7 @@ export const PREVIEW_CSP = [
   "frame-src 'none'",
   "object-src 'none'",
   "form-action 'none'",
+  "frame-ancestors 'self'",
   "base-uri 'none'"
 ].join("; ");
 

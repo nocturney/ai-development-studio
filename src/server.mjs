@@ -10,6 +10,7 @@ import { diffLines } from "./agent/diff.mjs";
 import { ReviewStore } from "./agent/review-store.mjs";
 import { runReviewAgent } from "./agent/review-agent.mjs";
 import { PREVIEW_CSP, buildStaticPreview } from "./preview.mjs";
+import { diagnoseSandbox } from "./sandbox/windows.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.STUDIO_PORT ?? 4178);
@@ -60,7 +61,16 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { cloudEnabled: false, catalog: PROVIDER_CATALOG, instances: await scanOllama() });
     }
     if (req.method === "GET" && req.url === "/api/health") {
-      return json(res, 200, { name: "ai-development-studio", version: "0.0.4", cloudEnabled: false, status: "prototype" });
+      return json(res, 200, { name: "ai-development-studio", version: "0.0.5", cloudEnabled: false, status: "prototype" });
+    }
+    if (req.method === "GET" && req.url === "/api/sandbox/diagnostic") {
+      const state = await diagnoseSandbox();
+      return json(res, 200, {
+        ...state,
+        executionEnabled: false,
+        boundary: "diagnostic-only",
+        caution: "Git worktrees are not OS execution sandboxes"
+      });
     }
     if (req.method === "GET" && req.url === "/api/agent/reviews") {
       const reviews = await reviewStore.list();

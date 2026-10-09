@@ -80,7 +80,8 @@ hr{border:0;border-top:1px solid #2b323c;margin:25px 0}
 <div class="compose"><div class="composer"><textarea id="prompt" placeholder="Ask your local model a question..." aria-label="Prompt"></textarea><button id="send">Send</button></div>
 <div class="note" id="status">No requests leave this computer. Enter to send, Shift+Enter for newline.</div></div></main>
 <section class="details"><h2>Project foundation</h2><p class="info">This workspace will evolve into an application builder with code editor, live preview, Git diffs and an autonomous agent.</p>
-<hr><h2>Current milestone</h2><p class="info">Ollama discovery ✓<br>Local model selection ✓<br>Local chat ✓<br>Limited local agent ✓<br>Cloud egress blocked ✓</p>
+<hr><h2>Current milestone</h2><p class="info">Ollama discovery ✓<br>Local model selection ✓<br>Local chat ✓<br>Two-file review + preview ✓<br>Cancellation + recovery ✓<br>Cloud egress blocked ✓</p>
+<hr><h2>Execution safety</h2><p class="info" id="sandboxStatus">Checking local sandbox status...</p>
 <hr><h2>Later integrations</h2><div class="tag">OpenCode SDK</div><div class="tag">Git worktrees</div><div class="tag">Live preview</div><div class="tag">Provider plugins</div></section>
 </div>
 <script>
@@ -92,6 +93,7 @@ const reviewDemo=document.getElementById("reviewDemo"),reviewActions=document.ge
 let currentReview=null;
 const reviewList=document.getElementById("reviewList"),reloadReviews=document.getElementById("reloadReviews"),cancelReview=document.getElementById("cancelReview");
 const previewPanel=document.getElementById("previewPanel"),previewFrame=document.getElementById("previewFrame");
+const sandboxStatus=document.getElementById("sandboxStatus");
 let currentRunId=null;
 async function loadModels(){
  modelSelect.replaceChildren();status.textContent="Scanning Ollama on localhost...";
@@ -362,8 +364,22 @@ discardReview.addEventListener("click",()=>actOnReview("discard"));
 send.addEventListener("click",submit);
 prompt.addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();submit()}});
 document.getElementById("refresh").addEventListener("click",loadModels);
+async function loadSandboxDiagnostic(){
+ try{
+  const response=await fetch("/api/sandbox/diagnostic");
+  if(!response.ok)throw Error("diagnostic not available");
+  const data=await response.json();
+  sandboxStatus.textContent="Code execution disabled. "+(data.featureState==="Disabled"?
+   "Windows Sandbox is not enabled on this computer.":
+   data.featureState==="Enabled"?"Windows Sandbox is installed, but the trusted runner is not implemented.":
+   "Execution isolation is not yet available ("+data.reason+").");
+ }catch{
+  sandboxStatus.textContent="Code execution disabled. Sandbox availability could not be verified.";
+ }
+}
 loadModels();
 loadLatestReview();
+loadSandboxDiagnostic();
 </script>
 </body>
 </html>

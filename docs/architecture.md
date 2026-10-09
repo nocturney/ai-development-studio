@@ -5,6 +5,8 @@ State: Accepted for prototype; revisable after benchmark.
 
 Prototype update (2026-10-09): v0.0.3 proved single-file tool use through local Qwen, CLI and SSE. v0.0.4 now extends the isolated pilot to two allowlisted files, one fresh Git worktree per run, explicit review and approve/discard actions, persisted review manifests, post-review content fingerprints, and a Git diff. The first live multi-file CLI pilot passed 10/10 checks and remained pending while main stayed untouched. This is still NOT a production general-purpose coding agent; no arbitrary shell or untrusted code execution.
 
+Prototype update (2026-10-09): v0.0.5 integrates the two-file review system with a parsed, allowlist-based HTML/CSS preview in a scriptless sandboxed iframe. The agent now supports explicit per-run cancellation, a total deadline, persisted heartbeats, and conservative recovery from stale runs. A read-only Windows Sandbox diagnostic endpoint reports platform readiness but **does not enable execution**. Validation: 40 unit tests passed; integrated HTTP smoke checks verified preview CSP, tamper blocking, rejected/discarded review handling, and cancellation over SSE. UI browser click automation is not yet proven; no arbitrary code is executed.
+
 ## Isolation
 The studio has an independent repository, release lifecycle, settings, credentials, UI, model-provider registry, and project state. No imports from Office 2.0 or VelvetOS. Future integration is an OPTIONAL adapter over documented API after product validation.
 
