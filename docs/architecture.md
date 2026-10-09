@@ -7,6 +7,8 @@ Prototype update (2026-10-09): v0.0.3 proved single-file tool use through local 
 
 Prototype update (2026-10-09): v0.0.5 integrates the two-file review system with a parsed, allowlist-based HTML/CSS preview in a scriptless sandboxed iframe. The agent now supports explicit per-run cancellation, a total deadline, persisted heartbeats, and conservative recovery from stale runs. A read-only Windows Sandbox diagnostic endpoint reports platform readiness but **does not enable execution**. Validation: 40 unit tests passed; integrated HTTP smoke checks verified preview CSP, tamper blocking, rejected/discarded review handling, and cancellation over SSE. UI browser click automation is not yet proven; no arbitrary code is executed.
 
+Prototype update (2026-10-09): v0.0.7 adds tested streamed local Ollama chat with cancellation and a prepared-only Windows Sandbox offline Node test contract; VM execution stays disabled. v0.0.8 adds an **opt-in read-only project catalog** scoped to a deliberately selected local root, with bounded file inspection, symlink and traversal denial, no editing, no shell and no remote model data transfer. The explicit read-only boundary lets us inspect real project structures before authorizing any future executable agent operations.
+
 ## Isolation
 The studio has an independent repository, release lifecycle, settings, credentials, UI, model-provider registry, and project state. No imports from Office 2.0 or VelvetOS. Future integration is an OPTIONAL adapter over documented API after product validation.
 

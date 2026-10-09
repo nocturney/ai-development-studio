@@ -30,6 +30,15 @@ textarea{border:none;resize:vertical;min-height:62px;max-height:210px;outline:no
 #send{background:#acc6f6;color:#18283d;border:none;font-weight:650}
 #stopChat{border:1px solid #875253;color:#f0bbb9}
 #stopChat[disabled]{display:none}
+.projectbar{padding:10px 32px;background:#171d26;border-bottom:1px solid #29313d;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.projectbar small{color:#8d9cad}
+#projectPanel{padding:14px 32px;background:#141b24;border-bottom:1px solid #303947;max-height:37vh;overflow:auto}
+#projectPanel[hidden]{display:none}
+.projectgrid{display:grid;grid-template-columns:210px minmax(0,1fr);gap:14px;max-height:32vh}
+#projectFiles{display:flex;flex-direction:column;gap:5px;overflow:auto}
+#projectFiles button{text-align:left;font-size:12px;padding:7px;overflow-wrap:anywhere}
+#projectCode{margin:0;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;max-height:30vh;font-size:12px;border:1px solid #333e4e;border-radius:9px;background:#10141b}
+@media(max-width:640px){.projectgrid{grid-template-columns:1fr}#projectPanel{padding:12px}}
 .note{font-size:11px;color:#808a99;padding:9px 4px}.info{font-size:13px;color:#aeb9c7;line-height:1.6}
 .tag{display:inline-block;padding:4px 7px;border:1px solid #384150;border-radius:6px;font-size:11px;margin:4px 2px}
 hr{border:0;border-top:1px solid #2b323c;margin:25px 0}
@@ -64,9 +73,11 @@ hr{border:0;border-top:1px solid #2b323c;margin:25px 0}
 <div class="option disabled"><span>Puter.js</span><span class="status">Off</span></div>
 <div class="section">Privacy</div><p class="info">No cloud model requests. No developer API keys. Chat history stays in browser memory. Agent demo files stay in a separate local test folder.</p>
 </aside>
-<main><header><div><h1>Local model workspace</h1><small>v0.0.7 · streaming chat · restricted coding agent · static preview</small></div>
+<main><header><div><h1>Local model workspace</h1><small>v0.0.8 · project explorer · local AI · restricted coding agent</small></div>
 <div><select id="model" aria-label="Choose a local model"><option>Scanning local models...</option></select>
 <button id="refresh" title="Refresh local models">↻</button></div></header>
+<section class="projectbar"><select id="projectSelect" aria-label="Read-only project"><option>Checking projects...</option></select><button id="browseProject" disabled>Browse files</button><small id="projectState">Only explicitly configured local projects can be browsed. Read-only.</small></section>
+<section id="projectPanel" hidden><div class="projectgrid"><div id="projectFiles" aria-label="Project files"></div><pre id="projectCode" aria-label="Read-only source preview">Select a file to inspect.</pre></div></section>
 <section class="agentbar"><button id="agentDemo" disabled>One-file demo</button><button id="reviewDemo" disabled>Run two-file worktree demo</button><button id="cancelReview" disabled>Cancel current run</button><select id="reviewList" aria-label="Previous agent reviews"><option>Review history...</option></select><button id="reloadReviews" title="Refresh reviews">↻</button>
 <span id="agentState">Safe local agent tools only. No shell execution, cloud models or changes to main.</span></section>
 <section id="agentResult" hidden><h2 id="agentOutcome">Agent pilot</h2>
@@ -92,6 +103,7 @@ const modelSelect=document.getElementById("model"),chat=document.getElementById(
 const messages=[];
 const stopChat=document.getElementById("stopChat");
 let currentChatController=null;
+const projectSelect=document.getElementById("projectSelect"),browseProject=document.getElementById("browseProject"),projectPanel=document.getElementById("projectPanel"),projectFiles=document.getElementById("projectFiles"),projectCode=document.getElementById("projectCode"),projectState=document.getElementById("projectState");
 const agentDemo=document.getElementById("agentDemo"),agentState=document.getElementById("agentState"),agentResult=document.getElementById("agentResult"),agentTrace=document.getElementById("agentTrace"),agentDiff=document.getElementById("agentDiff"),agentOutcome=document.getElementById("agentOutcome");
 let agentIsRunning=false;
 const reviewDemo=document.getElementById("reviewDemo"),reviewActions=document.getElementById("reviewActions"),approveReview=document.getElementById("approveReview"),discardReview=document.getElementById("discardReview"),reviewBranch=document.getElementById("reviewBranch");
@@ -449,10 +461,64 @@ async function loadStorageMode(){
   storageStatus.textContent="Storage state could not be verified.";
  }
 }
+async function loadProjectCatalog(){
+ projectSelect.replaceChildren();browseProject.disabled=true;
+ try{
+  const response=await fetch("/api/projects");
+  if(!response.ok)throw Error("catalog not available");
+  const data=await response.json();
+  if(!data.enabled){projectState.textContent="Project browser disabled. Set an explicit local projects root to opt in.";return}
+  for(const item of data.projects){
+   const option=document.createElement("option");option.value=item.id;option.textContent=item.name;
+   projectSelect.appendChild(option);
+  }
+  browseProject.disabled=data.projects.length===0;
+  projectState.textContent=data.projects.length?
+   data.projects.length+" local project(s) available · files are read-only":
+   "No permitted project folders in the configured root.";
+ }catch{
+  projectState.textContent="Project catalog unavailable. No files were read.";
+ }
+}
+async function browseReadOnlyProject(){
+ if(browseProject.disabled||!projectSelect.value)return;
+ const name=projectSelect.value;
+ browseProject.disabled=true;
+ projectPanel.hidden=false;projectFiles.replaceChildren();
+ projectCode.textContent="Loading read-only files...";
+ try{
+  const response=await fetch("/api/projects/files?project="+encodeURIComponent(name));
+  const result=await response.json();
+  if(!response.ok)throw Error(result.error||"Could not browse project");
+  for(const entry of result.files){
+   const button=document.createElement("button");button.textContent=entry.path;
+   button.title=entry.bytes+" bytes, read-only";
+   button.addEventListener("click",async()=>{
+    button.disabled=true;
+    try{
+     const url="/api/projects/file?project="+encodeURIComponent(name)+"&path="+encodeURIComponent(entry.path);
+     const response=await fetch(url),file=await response.json();
+     if(!response.ok)throw Error(file.error||"File cannot be read");
+     projectCode.textContent="// "+entry.path+" · READ ONLY\n\n"+file.content;
+    }catch(error){projectCode.textContent="Read-only file error: "+error.message}
+    finally{button.disabled=false}
+   });
+   projectFiles.appendChild(button);
+  }
+  projectCode.textContent=result.files.length?
+   "Select a file to inspect. No code will be executed or modified.":
+   "No readable source files found.";
+  projectState.textContent="Browsing "+name+" · read-only · no cloud transfer";
+ }catch(error){
+  projectCode.textContent="Unable to browse: "+error.message;
+ }finally{browseProject.disabled=false}
+}
+browseProject.addEventListener("click",browseReadOnlyProject);
 loadModels();
 loadLatestReview();
 loadSandboxDiagnostic();
 loadStorageMode();
+loadProjectCatalog();
 </script>
 </body>
 </html>

@@ -2,7 +2,7 @@
 
 Standalone, local-first AI development studio. Independent repository, runtime and releases; **not an Office 2.0 component**.
 
-**Current build: v0.0.7 research prototype.** Local model chat plus two tested, **restricted** tool-using agent pilots, Git worktree review, safe static preview, run cancellation, and crash recovery. This is **not** a general-purpose Dyad replacement, a secure production execution sandbox, or an unrestricted developer agent.
+**Current build: v0.0.8 research prototype.** Local model chat plus two tested, **restricted** tool-using agent pilots, Git worktree review, safe static preview, run cancellation, and crash recovery. This is **not** a general-purpose Dyad replacement, a secure production execution sandbox, or an unrestricted developer agent.
 
 ## Run on Windows
 
@@ -20,6 +20,7 @@ Open **http://127.0.0.1:4178** on the **same machine**; the service binds only t
 ## What works
 
 - **Chat:** choose a discovered local Ollama model (Windows pilot: Qwen 3.5 9B) and receive streamed replies with a Stop button. No app-imposed daily message quota or cloud fallback.
+- **Read-only project browser (opt-in):** set `STUDIO_PROJECTS_ROOT` to a permitted local parent directory and browse a restricted list of project source files. User code is never executed, edited or sent to a model from this feature.
 - **One-file demo:** restricted HTML editing and deterministic checks.
 - **Two-file worktree demo:** inspect, edit and statically validate index.html and styles.css in a per-run Git worktree.
 - **Human review:** inspect a Git diff and approve a commit on the pilot branch or discard and roll back the branch. The primary branch is not silently changed.
@@ -55,4 +56,4 @@ The Windows host inspection found Windows Sandbox disabled; Docker and Podman we
 
 Cursor may help review code as a separately authorized development tool, **not** as the application's model runtime. No Cursor API/Agent quota was consumed during this build.
 
-See [Offline runner contract](docs/runner-contract.md), [Streaming Chat](docs/streaming-chat.md), [Storage](docs/storage.md), [Architecture](docs/architecture.md), [Git Worktrees](docs/review-worktrees.md), [Cancellation & Recovery](docs/reliability-cancellation.md), [Cursor collaboration](docs/cursor-collaboration.md), and [Provider Research](docs/providers.md).
+See [Read-only project browser](docs/project-browser.md), [Offline runner contract](docs/runner-contract.md), [Streaming Chat](docs/streaming-chat.md), [Storage](docs/storage.md), [Architecture](docs/architecture.md), [Git Worktrees](docs/review-worktrees.md), [Cancellation & Recovery](docs/reliability-cancellation.md), [Cursor collaboration](docs/cursor-collaboration.md), and [Provider Research](docs/providers.md).
