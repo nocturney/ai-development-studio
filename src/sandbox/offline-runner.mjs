@@ -180,3 +180,90 @@ export function parseUntrustedRunnerResult(raw, manifest) {
   }
   return { ...record, trusted: false, requiresHumanReview: true };
 }
+
+// Host-side preflight only: verifies a prepared bundle without executing any guest code.
+// Expected digests must come from the trusted staging response, not from the bundle itself.
+export async function verifyPreparedOfflineRunnerJob({
+  jobRoot, expectedManifestHash, expectedRuntimeSha256
+}) {
+  if (typeof jobRoot !== "string" || !path.isAbsolute(jobRoot) ||
+      !/^[a-f0-9-]{36}$/i.test(path.basename(jobRoot)) ||
+      !/^[a-f0-9]{64}$/.test(expectedManifestHash) ||
+      !/^[a-f0-9]{64}$/.test(expectedRuntimeSha256)) {
+    throw Error("invalid-runner-preflight-arguments");
+  }
+  const root = await fs.realpath(jobRoot);
+  if (path.normalize(root).toLowerCase() !== path.normalize(path.resolve(jobRoot)).toLowerCase()) {
+    throw Error("runner-job-symlink");
+  }
+  async function readSealed(relative) {
+    const target = path.join(root, relative);
+    const stat = await fs.lstat(target);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw Error("untrusted-runner-file");
+    const real = await fs.realpath(target);
+    if (path.normalize(real).toLowerCase() !== path.normalize(target).toLowerCase()) {
+      throw Error("runner-file-symlink");
+    }
+    return fs.readFile(target);
+  }
+  const manifest = JSON.parse((await readSealed("bundle/job.json")).toString("utf8"));
+  if (!manifest || manifest.schema !== RUNNER_SCHEMA ||
+      manifest.id !== path.basename(root)) throw Error("runner-manifest-mismatch");
+  const source = {};
+  if (!Array.isArray(manifest.files)) throw Error("invalid-runner-file-list");
+  for (const file of manifest.files) {
+    safeRelativeFile(file.name);
+    const content = await readSealed(path.join("bundle", "source", ...file.name.split("/")));
+    if (createHash("sha256").update(content).digest("hex") !== file.sha256 ||
+        content.length !== file.bytes) throw Error("runner-source-tampered");
+    source[file.name] = content.toString("utf8");
+    if (!Buffer.from(source[file.name], "utf8").equals(content)) throw Error("invalid-source-encoding");
+  }
+  const expected = defineOfflineJob({
+    id: manifest.id, sources: source, tests: manifest.tests,
+    timeoutSeconds: manifest.timeoutSeconds, memoryMB: manifest.memoryMB
+  });
+  if (expected.manifestHash !== expectedManifestHash ||
+      manifest.manifestHash !== expectedManifestHash ||
+      JSON.stringify(manifest) !== JSON.stringify(expected)) {
+    throw Error("runner-manifest-integrity-failed");
+  }
+  const sourceRoot = path.join(root, "bundle", "source");
+  const found = [];
+  async function walk(relative = "") {
+    for (const entry of await fs.readdir(path.join(sourceRoot, relative), { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) throw Error("runner-source-symlink");
+      const rel = relative ? relative + "/" + entry.name : entry.name;
+      if (entry.isDirectory()) await walk(rel);
+      else if (entry.isFile()) found.push(rel);
+      else throw Error("unrecognized-runner-source-type");
+    }
+  }
+  await walk();
+  const expectedPaths = expected.files.map(item => item.name).sort();
+  if (JSON.stringify(found.sort()) !== JSON.stringify(expectedPaths)) {
+    throw Error("runner-unexpected-source-files");
+  }
+  const outputInfo = await fs.lstat(path.join(root, "output"));
+  if (!outputInfo.isDirectory() || outputInfo.isSymbolicLink()) throw Error("unsafe-runner-output");
+  const runtime = await readSealed("bundle/node.exe");
+  if (createHash("sha256").update(runtime).digest("hex") !== expectedRuntimeSha256) {
+    throw Error("runner-runtime-integrity-failed");
+  }
+  const guest = await readSealed("bundle/guest-runner.ps1");
+  const trustedGuest = await fs.readFile(RUNNER_SCRIPT);
+  if (!guest.equals(trustedGuest)) throw Error("runner-guest-script-tampered");
+  const profile = (await readSealed("job.wsb")).toString("utf8");
+  const expectedProfile = createOfflineRunnerProfile({
+    inputHostFolder: path.join(path.resolve(jobRoot), "bundle"),
+    outputHostFolder: path.join(path.resolve(jobRoot), "output"),
+    memoryMB: manifest.memoryMB
+  });
+  if (profile.replace(/\r\n/g, "\n") !== expectedProfile.replace(/\r\n/g, "\n")) {
+    throw Error("runner-profile-tampered");
+  }
+  const outputs = await fs.readdir(path.join(root, "output"));
+  if (outputs.length) throw Error("runner-output-directory-not-empty");
+  return { id: manifest.id, manifestHash: expectedManifestHash,
+    executionEnabled: false, verified: true, status: "sealed-not-executed" };
+}
