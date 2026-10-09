@@ -1,0 +1,13 @@
+{
+  "name": "ai-development-studio",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Standalone local-first AI development studio foundation",
+  "scripts": {
+    "scan": "node src/cli.mjs scan",
+    "providers": "node src/cli.mjs providers",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=22" }
+}
