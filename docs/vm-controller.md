@@ -1,4 +1,4 @@
-# Windows Sandbox VM execution gate — v0.0.14
+# Windows Sandbox VM execution gate — v0.0.15
 
 ## Current state
 
@@ -67,7 +67,7 @@ certification, or enable arbitrary app project execution.
 - Crash/reboot during VM startup or teardown can leave an orphan. The journal will block future launches; a fully verified interactive recovery/unlock flow is not yet shipped.
 - Cross-process locks protect one designated jobs folder, not multiple deliberately different folders.
 - WSB memory allocation is not a calibrated per-process RAM or CPU quota.
-- Guest stdout is not streamed by wsb exec; tests write bounded logs to their dedicated result file.
+- Guest stdout is not streamed by wsb exec; tests write bounded logs to their dedicated result file. The v0.0.15 guest collector independently streams stdout/stderr into small buffers, stops execution on the 8,000-per-stream / 9,000-total character budget, and returns a fail-closed error; this was verified with a real output-flooding guest VM.
 - A privileged host process can potentially tamper with inputs between hashing and VM launch. Production use needs stronger ownership/ACLs and input immutability guarantees.
 - No user project sources, unknown dependencies or model-produced scripts have been executed in the VM.
 - The app has no VM launch endpoint and no cloud provider fallback.

@@ -90,3 +90,20 @@ test("preflight denies unexpected source files even if listed files are unmodifi
     await assert.rejects(verifyPreparedOfflineRunnerJob(args), /runner-unexpected-source-files/);
   });
 });
+
+test("preflight rejects modified bounded-output guard", async () => {
+  await stageScenario(async ({ args, jobRoot }) => {
+    const guard = path.join(jobRoot, "bundle", "guest-bounded-process.ps1");
+    await fs.appendFile(guard, "# modified output-guard");
+    await assert.rejects(verifyPreparedOfflineRunnerJob(args),
+      /runner-output-guard-tampered/);
+  });
+});
+
+test("preflight rejects extra bundle files without invoking the guest", async () => {
+  await stageScenario(async ({ args, jobRoot }) => {
+    await fs.writeFile(path.join(jobRoot, "bundle", "unexpected.ps1"), "exit 0");
+    await assert.rejects(verifyPreparedOfflineRunnerJob(args),
+      /runner-unexpected-bundle-files/);
+  });
+});

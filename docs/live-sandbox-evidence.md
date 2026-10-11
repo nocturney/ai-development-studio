@@ -96,3 +96,30 @@ Original and corrected driver, guest, and manifest JSON evidence is retained at
 D:\Velvet\Services\AIStudio\logs\vm-validation-20261011. These are
 trusted hard-coded arithmetic fixtures only, not arbitrary model-generated
 program execution. GUI/Agent VM invocation remains disabled.
+
+
+## 8. Guest output budget v0.0.15 — three real VM cases
+
+The bounded output collector was packaged as a separately sealed PowerShell
+component and verified by host preflight alongside the Node runtime, exact
+source inventory, guest runner and offline VM XML.
+
+Three hard-coded offline test fixtures were exercised through the real
+Windows Sandbox Store CLI on the signed-in Chris desktop on October 11, 2026:
+
+| Fixture | Guest status | Guest exit | Manual CLI | VM stopped | Owner lock |
+|---|---|---|---|---|---|
+| add(2,3) equals 5 | passed | 0 | 0 | yes | released |
+| add(2,3) equals 6 | failed | 1 | 2 | yes | released |
+| write 240,000 stdout chars | error | -1 | 2 | yes | released |
+
+The overflow fixture emitted the fail-closed test-output-limit-exceeded
+diagnostic instead of a successful test result. All guest reports were still
+marked trusted=false and requiresHumanReview=true, and never approved code.
+
+Separate original guest and host manifests, result files, and the trusted
+fixture are retained under
+D:\Velvet\Services\AIStudio\logs\vm-validation-20261011\bounded-output-v015.
+
+The VM did not run any model-written code, arbitrary shell instruction,
+user project, third-party dependency or Office 2.0 component.

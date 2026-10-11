@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const SUPPORTED_SUFFIXES = new Set([".mjs", ".js", ".cjs", ".json", ".html", ".css", ".md", ".txt"]);
 export const RUNNER_SCHEMA = "studio.runner.v1";
 const RUNNER_SCRIPT = fileURLToPath(new URL("./guest-runner.ps1", import.meta.url));
+const OUTPUT_GUARD_SCRIPT = fileURLToPath(new URL("./guest-bounded-process.ps1", import.meta.url));
 
 export function safeRelativeFile(name) {
   if (typeof name !== "string" || name.length < 1 || name.length > 170 ||
@@ -144,6 +145,8 @@ export async function stageOfflineRunnerJob({
     const runtimeHash = await copyAndHash(nodeExecutable, path.join(bundle, "node.exe"));
     const script = await fs.readFile(RUNNER_SCRIPT);
     await fs.writeFile(path.join(bundle, "guest-runner.ps1"), script, { flag: "wx" });
+    const outputGuard = await fs.readFile(OUTPUT_GUARD_SCRIPT);
+    await fs.writeFile(path.join(bundle, "guest-bounded-process.ps1"), outputGuard, { flag: "wx" });
     await fs.writeFile(path.join(bundle, "job.json"), JSON.stringify(manifest, null, 2), { flag: "wx" });
     const wsb = createOfflineRunnerProfile({
       inputHostFolder: bundle, outputHostFolder: output, memoryMB
@@ -252,6 +255,14 @@ export async function verifyPreparedOfflineRunnerJob({
   const guest = await readSealed("bundle/guest-runner.ps1");
   const trustedGuest = await fs.readFile(RUNNER_SCRIPT);
   if (!guest.equals(trustedGuest)) throw Error("runner-guest-script-tampered");
+  const guard = await readSealed("bundle/guest-bounded-process.ps1");
+  const trustedGuard = await fs.readFile(OUTPUT_GUARD_SCRIPT);
+  if (!guard.equals(trustedGuard)) throw Error("runner-output-guard-tampered");
+  const bundledEntries = (await fs.readdir(path.join(root, "bundle"))).sort();
+  const expectedEntries = ["guest-bounded-process.ps1", "guest-runner.ps1", "job.json", "node.exe", "source"];
+  if (JSON.stringify(bundledEntries) !== JSON.stringify(expectedEntries)) {
+    throw Error("runner-unexpected-bundle-files");
+  }
   const profile = (await readSealed("job.wsb")).toString("utf8");
   const expectedProfile = createOfflineRunnerProfile({
     inputHostFolder: path.join(path.resolve(jobRoot), "bundle"),
