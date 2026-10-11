@@ -1,77 +1,62 @@
-# Windows Sandbox VM execution gate — v0.0.12
+# Windows Sandbox VM execution gate — v0.0.13
 
-## Current status
+## Current state
 
-The new VM controller handles job-specific operator approval, capability checking,
-preflight integrity verification, VM startup, completion polling, cancellation, guest
-timeout, and VM shutdown. The VM lifecycle has been tested using mocked WSB CLI calls.
-**No actual Windows Sandbox VM has run**.
+The controller in src/sandbox/vm-controller.mjs now has **actual live smoke-test evidence** on Windows 11 Pro and Store Windows Sandbox CLI v0.8.107.0, alongside automated tests of failure and cancellation paths.
 
-Windows host inspection (October 11, 2026): Windows 11 Pro with the Windows Sandbox
-feature Enabled and Microsoft Store Windows Sandbox 0.8.107.0 installed. The official
-CLI is a per-user App Execution Alias under LOCALAPPDATA/Microsoft/WindowsApps/wsb.exe,
-not System32/wsb.exe. The remote service continues to run as NT AUTHORITY\SYSTEM and
-is deliberately rejected as noninteractive. From the logged-on Chris desktop session,
-a read-only probe verified the feature Enabled, the real CLI version, and
-featureReady=true without administrator elevation or a VM launch.
+- The user enabled Windows Sandbox and rebooted; Studio did not alter OS security features.
+- Read-only readiness works from the signed-in Chris Windows session without administrator privileges.
+- The Studio localhost server runs under CHRIS\Chris with Qwen3.5 9B via local Ollama and retains previous Review state.
+- The browser and model-driven Agent cannot launch a VM, execute arbitrary commands, or install dependencies.
+- A separate manual CLI command remains guarded by a unique typed approval phrase and a transient opt-in.
+- The first fully real test used only a trusted, hard-coded addition fixture. No model-generated or unknown code was executed.
 
-Studio's HTTP app does NOT expose VM launch endpoints. Arbitrary project execution
-and host shell execution remain unavailable.
+## Manual commands
 
-## Readiness and manual demonstration
-
-Read-only command, safe at any time:
+Status without changing the system:
 
     npm run runner:vm-readiness
 
-When Windows Sandbox is installed and the operator is logged into an interactive
-Windows desktop session, the following future opt-in can start ONLY the bundled
-sample Node.js addition test in a Windows Sandbox VM:
+Predefined offline sample (requires signed-in interactive PowerShell and exact per-run consent):
 
     $env:STUDIO_ALLOW_VM_EXECUTION = "1"
     npm run runner:vm-demo
 
-The operator must type the exact per-job phrase containing the unique job ID and
-verified manifest digest. Missing consent, service Session 0, unavailable Sandbox,
-missing WSB CLI, or a headless terminal block execution.
+The manual command stages the sample, prints its unique ID and SHA-256 manifest fingerprint, and asks the operator to type its exact approval phrase. Without typed approval or an interactive session, the command exits before launching a VM.
 
-This mode has NOT been exercised on an actual Sandbox host yet.
+## Verified lifecycle
 
-## Guarded lifecycle
+1. Deny service accounts and Session 0. Detect the user-local Store App Execution Alias (fallback: System32 only) and verify its version.
+2. Diagnose the Windows Sandbox feature using Win32_OptionalFeature WMI, with DISM fallback. Unknown state fails closed.
+3. Validate explicit approval, runtime staging, source checksums, guest script, guest Node binary, exact source inventory, and the XML profile.
+4. Acquire an atomic per-operator VM ownership lock and write the VM ID and job ID before launch.
+5. Start the exact VM with wsb start --id and offline XML config. Mount only a read-only bundle at C:\StudioInput and one dedicated writable output directory at C:\StudioResults. Disable networking, virtual GPU, clipboard and redirections.
+6. Do not rely on LogonCommand. In the headless CLI it was observed not to run automatically without guest logon. Invoke the **fixed** PowerShell guest harness using wsb exec --run-as System with a single --command string.
+7. Require the CLI's structured ExitCode 0 response. Read the separately written guest result.json and validate its job ID, digest, fields and size. Guest results remain trusted=false, requiresHumanReview=true, with no automatic approval.
+8. On success, error, abort or timeout, request wsb stop for the exact VM ID.
+9. After stopping, call wsb list --raw and require that the VM is absent before marking it stopped and releasing the ownership lock. If CLI stop or list cannot be verified, retain stop-unverified state and surface the ID for manual investigation.
 
-1. Require interactive Windows user rather than a SYSTEM/service identity.
-2. Confirm Windows Sandbox Enabled and the trusted WSB CLI executable exists.
-3. Require environment opt-in, terminal confirmation, and exact per-job approval.
-4. Verify the staged package against independently supplied trusted hashes.
-5. Start a uniquely identified VM with WSB start --id and a sealed, offline XML config.
-6. Poll only the dedicated result.json file within startup and execution deadlines.
-7. Treat all guest output as untrusted, with mandatory human review.
-8. Attempt WSB stop --id after completion, failure, timeout, or cancellation.
-9. Fail closed and disclose the VM identifier if stop confirmation fails.
+## Real Windows checks (October 11, 2026)
 
-The config disables guest network access, vGPU, clipboard, printer and device sharing.
-It exposes only a read-only input bundle and a dedicated writable result folder.
+- Real wsb start, list, exec and stop were used to create, run and destroy temporary VMs.
+- A dedicated trusted audit inside a sandbox with offline XML and mapped read-only input recorded: zero active network adapters, zero IPv4 default routes, TCP 443 to 1.1.1.1 unreachable, inability to write to the input folder and successful output-folder write.
+- A fixed sample Node.js test added two numbers and passed 1/1 tests within a VM. The guest report initially showed stderr:null when the error file was empty; the host correctly rejected that schema. The guest writer was fixed to retain empty strings, and the next real run passed with exitCode=0, trusted=false and sandboxStopped=true. The ownership journal was empty afterwards.
+- The controller now also protects against the subtle case in which wsb stop returns success but wsb list still shows the VM. Tests preserve the lock in that case.
 
-## Critical limitations
+These checks prove the configured host integration works for the trusted sample and measured isolation properties. They **do not** prove all Sandbox escape techniques are impossible, offer a malware security certification, or enable arbitrary app project execution.
 
-- Testing verified the controller's logic using simulated WSB CLI calls; not actual
-  guest isolation, startup performance, networking behavior, or shutdown behavior.
-- Unexpected host termination during the startup/stop window may leave a VM that
-  requires manual investigation with WSB list and WSB stop --id.
-- A persistent VM ownership journal now records the VM ID and blocks concurrent starts or silent resumption after a crash. Automatic orphan termination and safe operator-driven journal unlock are still not implemented; see docs/vm-ownership.md.
-- A privileged host process could alter staging inputs between verification and launch;
-  run from a protected, single-writer staging directory.
-- Guest success is not proof of secure code and never auto-approves source changes.
-- MemoryInMB controls sandbox allocation, not a calibrated per-process resource quota.
-- Never share credentials or real user projects with an unverified Sandbox Runner.
-- Windows Sandbox was enabled and the machine restarted by the user. Studio did not
-  change virtualization features, security settings or UAC policy.
-- The new Store CLI is detected in the interactive user's WindowsApps directory, with
-  System32 as a fallback; the probe does not run arbitrary executables from PATH.
-- Read-only feature status uses Win32_OptionalFeature WMI, with DISM as a fallback.
-  WMI state 1 means Enabled; unrecognized or inaccessible states fail closed.
+## Known limitations
 
-## Primary documentation
+- Crash/reboot during VM startup or teardown can leave an orphan. The journal will block future launches; a fully verified interactive recovery/unlock flow is not yet shipped.
+- Cross-process locks protect one designated jobs folder, not multiple deliberately different folders.
+- WSB memory allocation is not a calibrated per-process RAM or CPU quota.
+- Guest stdout is not streamed by wsb exec; tests write bounded logs to their dedicated result file.
+- A privileged host process can potentially tamper with inputs between hashing and VM launch. Production use needs stronger ownership/ACLs and input immutability guarantees.
+- No user project sources, unknown dependencies or model-produced scripts have been executed in the VM.
+- The app has no VM launch endpoint and no cloud provider fallback.
+- No Office 2.0 code or process is changed by this work.
+
+## Primary references
 
 https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-cli
 

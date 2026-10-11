@@ -1,4 +1,4 @@
-# VM ownership journal — v0.0.11
+# VM ownership journal — v0.0.13
 
 ## Why the journal exists
 
@@ -35,9 +35,10 @@ Such a record remains locked and explicitly requires operator investigation.
 An invalid, missing or tampered owner record inside an existing lock directory
 is reported as indeterminate and blocks additional runs.
 
-The journal is released only after the controller has confirmed the stop
-operation and recorded the stopped state. VM stop is always attempted even
-if progress callbacks fail, test results are malformed, or the operator cancels.
+The journal is released only after the controller confirms both that wsb stop
+returned successfully and that the exact VM is absent from the wsb list --raw
+response; only then is the stopped state recorded. VM stop is always attempted
+even if progress callbacks fail, test results are malformed, or the operator cancels.
 
 ## Crash/operator recovery
 
@@ -63,11 +64,10 @@ if progress callbacks fail, test results are malformed, or the operator cancels.
 - Automated tests cover ownership acquisition, collisions, stage transitions,
   crash persistence, corrupted journals, cancellation, confirmed stop and
   failed stop. These do not start a VM or run generated code.
-- There is still no live Windows Sandbox guest validation on this host.
+- The local Windows host completed live Sandbox start, exec, list, and stop; an offline guest audit and one trusted Node test fixture passed. These checks are not a production security certification.
 - Cross-process locks are limited to one configured jobs folder. Operators must
   not point different launchers at different directories to evade a stuck lock.
-- Windows Sandbox CLI list/stop compatibility and true OS resource isolation
-  remain to be validated after the feature is enabled.
+- Windows Sandbox CLI list/stop behavior and selected guest network/read-only isolation properties were measured live. Abrupt power-loss recovery and complete escape resistance remain unverified.
 - The web UI has no VM launch, recovery or unlock API endpoints. Runtime
   Cloud providers remain disabled; this does not affect Office 2.0.
 

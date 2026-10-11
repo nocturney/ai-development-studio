@@ -57,7 +57,7 @@ try {
   $stdoutPath = Join-Path $env:TEMP ('studio-out-' + $job.id + '.txt')
   $stderrPath = Join-Path $env:TEMP ('studio-err-' + $job.id + '.txt')
   $testNames = @($job.tests | ForEach-Object { [string]$_ })
-  $arguments = @('--test', '--test-concurrency=1') + $testNames
+  $arguments = @('--test', '--test-reporter=tap', '--test-concurrency=1') + $testNames
   $process = Start-Process -FilePath $runtimePath -ArgumentList $arguments -WorkingDirectory $workDir -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
   try {
     Wait-Process -Id $process.Id -Timeout ([int]$job.timeoutSeconds) -ErrorAction Stop
@@ -71,13 +71,17 @@ try {
   }
   if (Test-Path -LiteralPath $stdoutPath) {
     $value = Get-Content -LiteralPath $stdoutPath -Raw -Encoding UTF8
-    $report.stdout = [string]$value
-    if ($report.stdout.Length -gt 30000) { $report.stdout = $report.stdout.Substring(0, 30000) }
+    if ($null -ne $value) {
+      $report.stdout = [string]$value
+      if ($report.stdout.Length -gt 30000) { $report.stdout = $report.stdout.Substring(0, 30000) }
+    }
   }
   if (Test-Path -LiteralPath $stderrPath) {
     $value = Get-Content -LiteralPath $stderrPath -Raw -Encoding UTF8
-    $report.stderr = [string]$value
-    if ($report.stderr.Length -gt 30000) { $report.stderr = $report.stderr.Substring(0, 30000) }
+    if ($null -ne $value) {
+      $report.stderr = [string]$value
+      if ($report.stderr.Length -gt 30000) { $report.stderr = $report.stderr.Substring(0, 30000) }
+    }
   }
 } catch {
   $report.status = 'error'

@@ -1,43 +1,44 @@
-# Studio offline runner contract — v0.0.7
+# Studio offline runner contract — v0.0.13
 
-**Status: package preparation validated; Windows Sandbox execution remains DISABLED.**
-
-## Why this exists
-
-The first coding agent edits restricted HTML/CSS files but must NOT run arbitrary project scripts in the host process. Git worktrees isolate branches, not execution. This module prepares an explicit Node test-run package for a future Windows Sandbox VM. No feature is enabled, no VM is launched and no guest code is executed by package preparation.
+**Status: actual Windows Sandbox lifecycle, guest isolation probe, and trusted Node test fixture verified. Arbitrary project-code execution remains disabled in the app.**
 
 ## Contract
 
-- `src/sandbox/offline-runner.mjs` validates source-file names, size caps and a fixed `node-offline-tests` task (only explicit `*.test.mjs` or `*.spec.mjs` entrypoints).
-- A canonical SHA-256 manifest records all input hashes, timeout (5–120 seconds), memory (4–16 GB) and `network: disabled`.
-- Package directories are created with exclusive create; payload files are staged under `bundle/source/` and the portable Node executable under `bundle/node.exe`. The input files and guest PowerShell runner are mapped read-only **inside** Windows Sandbox.
-- A **separate, newly created output folder** is the sole writable host mapping; it is used only for `result.json`. No project or source directory is mapped writable. Guest executes from VM temporary storage.
-- `job.wsb` explicitly disables network, vGPU, clipboard, microphone, video and printer redirection; enables ProtectedClient. A script in the read-only bundle is referenced through LogonCommand.
-- The guest script verifies SHA-256 checksums of the copied source files and runs only bundled Node test entrypoints, with a timeout and bounded stdout/stderr capture.
-- Host result parser validates schema, job ID, manifest fingerprint, exit code, limits and lengths. **All guest results remain untrusted, require human review, and never auto-approve a Git change.**
+- src/sandbox/offline-runner.mjs accepts limited source types and explicitly listed .test.mjs or .spec.mjs entry points only. The app does not accept unrestricted shell commands or dependencies.
+- Each staged package has a SHA-256 manifest with bounded input files, explicit timeout of 5–120 seconds, VM memory setting of 4096–16384 MB and network disabled.
+- The bundle contains the guest script, a pinned input manifest, the Node executable and allowlisted static source/test files. It is mounted at C:\StudioInput with ReadOnly=true.
+- The sole writable host mapping is a dedicated per-job empty output directory at C:\StudioResults. The guest performs tests in disposable local VM temporary storage.
+- The .wsb XML profile disables network, vGPU, clipboard, microphone, video and printer redirection; enables ProtectedClient. It deliberately contains **no LogonCommand**, since that command is not reliably executed in a headless Sandbox before login.
+- After verified preflight and explicit manual per-job approval, vm-controller.mjs uses wsb start with a sealed XML config, then wsb exec with a **fixed hard-coded PowerShell guest-runner command** running as System. No source paths or model outputs are interpolated into this command.
+- The controller requires an ExitCode 0 CLI response, then independently validates the guest's result.json. Guest reports can never approve source code automatically and are always trusted=false with requiresHumanReview=true.
+- On every result, error, cancellation or timeout, wsb stop is attempted. The controller then verifies the VM's exact ID is absent from wsb list --raw before releasing the ownership journal. An ambiguous stop leaves the journal locked.
+- Empty PowerShell output files must serialize as JSON strings, never null. The guest Node test reporter uses ASCII TAP to improve log portability.
 
-## Current verification
+## Validated on Windows (October 11, 2026)
 
-`npm test` tests the runner contract and static safety gates. The guest script parses without syntax errors in PowerShell, and `npm run runner:prepare` packages a two-file calculator fixture with the host's existing portable Node executable. This creates files only under the ignored local `.pilot-workspace/offline-runner-packages` directory.
+- Microsoft Store Windows Sandbox CLI v0.8.107.0 detected from the signed-in Windows user.
+- Actual CLI start, exec, stop and list worked; the VM was removed from the list.
+- In the guest, a trusted probe observed 0 active adapters, 0 default IPv4 routes, outbound TCP to 1.1.1.1:443 unavailable, read-only input-folder write refused, and dedicated output-folder write succeeded.
+- A hard-coded add(2,3) Node test was staged with file/runtime hashes, executed inside a real VM via wsb exec, and reported passed, exitCode=0, trusted=false, requiresHumanReview=true; 1/1 tests passed. The first attempt exposed a null-versus-empty stderr schema bug, fixed and successfully retested.
+- Automated tests exercise tamper rejects, guest command parsing, stop/list failure, ownership journaling, cancellation and deadlines. Automated tests themselves do not launch VMs.
 
-## Not yet enabled
+## Limits
 
-- Windows Sandbox is Disabled on the current Windows host. Windows reported firmware virtualization not enabled. Supporting virtualization and any required restart must be scheduled separately.
-- There is no trusted host job launcher, no guest readiness handshake, no verified VM process lifecycle and no host-side kill/cleanup policy.
-- Output is a prototype contract only; a malicious guest can forge its writable `result.json`. Host must never treat it as proof of safety or merge authority.
-- There is no installation or network dependency resolution in the sandbox. Tests must be self-contained or have explicitly bundled dependencies.
-- CPU ceilings are not controlled by the WSB XML profile. The contract bounds memory and guest duration; stricter process limits, VM lifecycle and global concurrency controls must be designed and tested.
-- Windows Sandbox is not a headless application container; logon commands require a running VM user session. This has not been exercised.
-- The input bundle remains a host directory rather than tamper-evident sealed storage; rehash inputs immediately before future VM launch.
-- This contract is independent of Office 2.0 and Cloud Providers.
+- Only the manual CLI supports launching the predefined sample. The Studio HTTP server and two-file agent have **no VM execution endpoint**.
+- The VM output report remains untrusted and cannot approve changes.
+- Single-directory journal locking does not solve all privileged host tampering, process race or supply-chain risks.
+- MemoryInMB is not a calibrated per-process memory/CPU quota. No CPU limits, dependency installation, malicious breakout resistance or production security audit have been proven.
+- Microsoft documents that wsb exec does not stream guest stdout/stderr; reports are written to the isolated output mapping.
+- There is no automatic VM orphan recovery or journal removal after uncertain stop.
+- No Office 2.0 dependency, cloud model fallback, model-generated shell execution or paid agent runtime was added.
 
-## Commands
+## Operator commands
 
-```sh
-npm test
-npm run runner:prepare
-```
+Read-only: npm run runner:vm-readiness
 
-**Do not double-click or launch the resulting `.wsb` file in this prototype.** It is a generated future-run configuration, not a completed or secure execution service.
+Future manual demo: set STUDIO_ALLOW_VM_EXECUTION=1 in the interactive Windows desktop PowerShell, run npm run runner:vm-demo, and type the exact approval phrase displayed for that particular job.
 
-References: Microsoft Learn Windows Sandbox configuration, mapped folders, LogonCommand and install prerequisites.
+## References
+
+- https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-cli
+- https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-configure-using-wsb-file

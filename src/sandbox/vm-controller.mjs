@@ -17,6 +17,40 @@ import { VmOwnershipJournal } from "./vm-journal.mjs";
 
 const execFileAsync = promisify(execFile);
 const VM_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Hard-coded guest command: no model output, project content or user arguments
+// may be interpolated into this command line.
+export const GUEST_RUNNER_COMMAND = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\StudioInput\\guest-runner.ps1";
+
+export function parseSandboxListResponse(stdout) {
+  if (typeof stdout !== "string" || stdout.length > 20000) {
+    throw Error("invalid-sandbox-list-response");
+  }
+  let value;
+  try { value = JSON.parse(stdout); }
+  catch { throw Error("invalid-sandbox-list-response"); }
+  if (!value || !Array.isArray(value.WindowsSandboxEnvironments) ||
+      value.WindowsSandboxEnvironments.length > 256 ||
+      !value.WindowsSandboxEnvironments.every(x => x && VM_ID_RE.test(x.Id))) {
+    throw Error("invalid-sandbox-list-response");
+  }
+  return new Set(value.WindowsSandboxEnvironments.map(x => x.Id.toLowerCase()));
+}
+
+export function parseSandboxExecAcknowledgement(stdout) {
+  if (typeof stdout !== "string" || stdout.length > 2048) {
+    throw Error("invalid-sandbox-exec-response");
+  }
+  let record;
+  try { record = JSON.parse(stdout); }
+  catch { throw Error("invalid-sandbox-exec-response"); }
+  if (!record || typeof record !== "object" ||
+      !Number.isInteger(record.ExitCode) ||
+      record.ExitCode < 0 || record.ExitCode > 255) {
+    throw Error("invalid-sandbox-exec-response");
+  }
+  if (record.ExitCode !== 0) throw Error("sandbox-guest-command-failed");
+  return record.ExitCode;
+}
 
 /**
  * Do not execute arbitrary PATH results. The new Microsoft Store edition ships
@@ -169,7 +203,7 @@ export async function runWindowsVmJob({
   vmCommand = async (executable, args, options) => execFileAsync(executable, args, options),
   reportReader = readGuestReport,
   wait = delayWithSignal, now = () => performance.now(),
-  vmId = randomUUID(), pollMs = 1000, startupGraceMs = 90000,
+  vmId = randomUUID(), pollMs = 1000, startupGraceMs = 90000, guestBootWaitMs = 6000,
   journal = null, onEvent = () => {}
 }) {
   if (!executionOptIn || !interactiveConfirmation || approval !== expectedVmApproval(staged)) {
@@ -180,7 +214,8 @@ export async function runWindowsVmJob({
   }
   if (!VM_ID_RE.test(vmId) ||
       !Number.isInteger(pollMs) || pollMs < 100 || pollMs > 10000 ||
-      !Number.isInteger(startupGraceMs) || startupGraceMs < 1000 || startupGraceMs > 180000) {
+      !Number.isInteger(startupGraceMs) || startupGraceMs < 1000 || startupGraceMs > 180000 ||
+      !Number.isInteger(guestBootWaitMs) || guestBootWaitMs < 0 || guestBootWaitMs > 30000) {
     throw Error("invalid-vm-control-options");
   }
   if (!staged.manifest || staged.manifest.id !== staged.id ||
@@ -233,6 +268,17 @@ export async function runWindowsVmJob({
     ], { timeout: 60000, windowsHide: true, maxBuffer: 20000, signal });
     if (journal) await journal.transition(vmId, "running");
     emit({ stage: "running", vmId, jobId: staged.id });
+    // The Store CLI does not run LogonCommand until a guest user logs in.
+    // Explicit execution in the guest SYSTEM session works headlessly.
+    // Do not retry ambiguous execution failures: the command may have started.
+    if (guestBootWaitMs) await wait(guestBootWaitMs, signal);
+    signal?.throwIfAborted();
+    emit({ stage: "guest-command", vmId, jobId: staged.id });
+    const acknowledgement = await vmCommand(ready.executable, [
+      "exec", "--id", vmId, "--command", GUEST_RUNNER_COMMAND,
+      "--run-as", "System", "--raw"
+    ], { timeout: maxMs, windowsHide: true, maxBuffer: 20000, signal });
+    parseSandboxExecAcknowledgement(acknowledgement?.stdout);
     while (now() - startAt < maxMs) {
       signal?.throwIfAborted();
       const raw = await reportReader(staged.outputDir);
@@ -261,7 +307,20 @@ export async function runWindowsVmJob({
         await vmCommand(ready.executable, ["stop", "--id", vmId], {
           timeout: 25000, windowsHide: true, maxBuffer: 20000
         });
-        stopped = true;
+        // Exit code 0 from 'wsb stop' is not proof of VM termination.
+        // Query live VM sessions using the same user identity before releasing
+        // the durable ownership record.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (attempt > 0) await wait(800);
+          const listed = await vmCommand(ready.executable, ["list", "--raw"], {
+            timeout: 14000, windowsHide: true, maxBuffer: 20000
+          });
+          if (!parseSandboxListResponse(listed?.stdout).has(vmId.toLowerCase())) {
+            stopped = true;
+            break;
+          }
+        }
+        if (!stopped) throw Error("vm-still-running-after-stop");
         emit({ stage: "stopped", vmId, jobId: staged.id });
       } catch (error) {
         stopError = Error("vm-stop-not-confirmed; inspect session " + vmId + " manually", { cause: error });
