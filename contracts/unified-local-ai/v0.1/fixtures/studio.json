@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "velvet.local-ai.capability.v0.1",
+  "projectId": "ai-development-studio",
+  "repository": "nocturney/ai-development-studio",
+  "upstreamCommit": "65f547ca8d2bd3e7605a53ce9fb8135a8437e657",
+  "declaredModes": [
+    "OLLAMA_LOCAL_CHAT_PILOT",
+    "GIT_HUMAN_REVIEW_PILOT",
+    "TRUSTED_WINDOWS_VM_FIXTURE_MANUAL"
+  ],
+  "snapshot": {
+    "evidence": "GITHUB_CODE_ONLY",
+    "runtimeStatus": "UNKNOWN",
+    "hostVerified": false,
+    "port": null,
+    "hostIdentity": null
+  },
+  "policy": {
+    "localOnly": true,
+    "cloudFallback": "DISABLED",
+    "networkEgress": "NOT_AUTHORIZED",
+    "gpuInference": "PER_ASSET_APPROVAL_REQUIRED",
+    "vmExecution": "SEPARATE_OPERATOR_APPROVAL_REQUIRED",
+    "nativePlugins": "NOT_AUTHORIZED",
+    "arbitraryShell": "NOT_AUTHORIZED",
+    "jobSubmission": "NOT_AUTHORIZED",
+    "printer": "NOT_AUTHORIZED",
+    "humanReview": "REQUIRED"
+  },
+  "gpu": {
+    "leaseState": "UNKNOWN",
+    "approvedForInference": false
+  },
+  "result": {
+    "trusted": false,
+    "printQualified": false,
+    "approvedForPrinter": false,
+    "fabricationAction": "NONE"
+  },
+  "integration": {
+    "adapter": "NOT_IMPLEMENTED",
+    "sharedScheduler": false,
+    "jobSubmission": false
+  }
+}
