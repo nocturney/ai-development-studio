@@ -12,6 +12,7 @@ import {
 const ID = "3a2c95b6-6165-4c96-a39c-61a1d7d38c44";
 const VM_ID = "55c870e1-2a40-482c-84a8-98f78acebb29";
 const HASH = "a".repeat(64);
+const SID = "S-1-5-21-101-202-303-1001";
 const LIST_JSON = '{"WindowsSandboxEnvironments":[]}';
 
 async function withPrepared(run) {
@@ -41,7 +42,7 @@ async function withPrepared(run) {
     interactiveConfirmation: true, vmId: VM_ID, startupGraceMs: 1000, guestBootWaitMs: 0,
     readinessProbe: async () => ({
       schema: VM_TEST_DRIVER, platform: "win32", session: "interactive",
-      cliPresent: true, featureReady: true, executable: "C:\\Windows\\System32\\wsb.exe"
+      cliPresent: true, featureReady: true, userSid: SID, executable: "C:\\Windows\\System32\\wsb.exe"
     }),
     preflight: async () => ({
       id: ID, manifestHash: HASH, verified: true, executionEnabled: false
@@ -69,7 +70,7 @@ test("vm capability probe never enables Sandbox and rejects service account", as
 test("vm probe enforces enabled feature, active user session, and known CLI", async () => {
   const base = {
     platform: "win32", username: "Chris", sessionProbe: async () => 2,
-    executableProbe: async () => true
+    executableProbe: async () => true, identityProbe: async () => SID
   };
   const disabled = await probeWindowsVm({
     ...base, featureProbe: async () => ({ featureState: "Disabled" })
@@ -371,5 +372,39 @@ test("invalid WSB list JSON keeps VM ownership locked for inspection", async () 
           argv[0] === "list" ? "not-json" : ""})
     }), /vm-stop-not-confirmed/);
     assert.equal((await args.journal.inspect()).status, "stop-unverified");
+  });
+});
+
+test("the VM journal is bound to the verified Windows owner SID before launch", async()=>{
+  await withPrepared(async({args})=>{
+    let observedSid=null;
+    await runWindowsVmJob({
+      ...args,
+      vmCommand:async(executable,argv)=>{
+        if(argv[0]==="start") {
+          const owner=await args.journal.read();
+          observedSid=owner.ownerSid;
+        }
+        return {stdout:argv[0]==="exec"?'{"ExitCode":0}':
+          argv[0]==="list"?LIST_JSON:""};
+      }
+    });
+    assert.equal(observedSid,SID);
+    assert.equal((await args.journal.inspect()).active,false);
+  });
+});
+
+test("the VM driver refuses unidentified operators before creating any journal",async()=>{
+  await withPrepared(async({args,calls})=>{
+    await assert.rejects(runWindowsVmJob({
+      ...args,
+      readinessProbe:async()=>({
+        featureReady:true,platform:"win32",session:"interactive",
+        cliPresent:true,executable:"C:\\Windows\\System32\\wsb.exe",
+        userSid:null
+      })
+    }),/vm-operator-windows-sid-required/);
+    assert.deepEqual(calls,[]);
+    assert.equal((await args.journal.inspect()).active,false);
   });
 });

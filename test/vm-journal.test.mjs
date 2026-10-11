@@ -9,6 +9,7 @@ import { runWindowsVmJob, expectedVmApproval } from "../src/sandbox/vm-controlle
 const JOB_ID = "24a8e2b5-6c01-49d0-b0c9-144cf924113f";
 const VM_ID = "00c55d38-4270-4c6a-8c07-27e6a444d4a2";
 const HASH = "a".repeat(64);
+const SID = "S-1-5-21-101-202-303-1001";
 const LIST_JSON = '{"WindowsSandboxEnvironments":[]}';
 
 async function fixture(run) {
@@ -124,7 +125,7 @@ async function withSimulatedVM(run) {
       executionOptIn: true, interactiveConfirmation: true, guestBootWaitMs: 0,
       readinessProbe: async () => ({
         featureReady: true, platform: "win32", session: "interactive",
-        cliPresent: true, executable: "C:\\Windows\\System32\\wsb.exe"
+        cliPresent: true, userSid: SID, executable: "C:\\Windows\\System32\\wsb.exe"
       }),
       preflight: async () => ({ id: JOB_ID, manifestHash: HASH, verified: true, executionEnabled: false }),
       reportReader: async () => record,

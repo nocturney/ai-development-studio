@@ -1,4 +1,4 @@
-# VM ownership journal — v0.0.13
+# VM ownership journal — v0.0.16
 
 ## Why the journal exists
 
@@ -6,7 +6,8 @@ A Windows Sandbox VM can outlive the local Node process that started it if
 the host process crashes, the computer loses power, or a stop command fails.
 
 The journal stores exactly one active VM identifier, job identifier, trusted
-manifest hash and control state per runner-jobs folder, with atomic ownership
+manifest hash, verified Windows account SID (for v0.0.16+ records), original
+controller PID and control state per runner-jobs folder, with atomic ownership
 acquisition through a newly created directory. This does not itself prove that
 the guest has stopped.
 
@@ -53,9 +54,14 @@ even if progress callbacks fail, test results are malformed, or the operator can
        wsb stop --id <recorded-vm-id>
 
 4. Confirm the VM is absent, inspect the job result directory and local
-   ownership record. A dedicated safe unlock workflow has NOT yet been
-   implemented. Do not silently delete or overwrite a journal simply because
-   its process ID appears stale.
+   ownership record. For a v0.0.16+ record bound to your exact Windows SID,
+   use read-only `npm run runner:vm-recovery -- --inspect`. If the record is
+   eligible and its original process has exited, manually opt in with
+   `STUDIO_ALLOW_VM_RECOVERY=1` and run `npm run runner:vm-recovery -- --release`
+   from a genuine interactive PowerShell session. Type the full unique phrase.
+   The engine performs two additional real WSB-list checks and verifies that
+   the record did not change. No automatic stop or force-unlock is available.
+   Legacy records without an owner SID remain locked.
 5. Do not claim success, trust guest logs, or merge source code because a VM
    produced a successful exit code. Manual review remains mandatory.
 
@@ -68,6 +74,11 @@ even if progress callbacks fail, test results are malformed, or the operator can
 - Cross-process locks are limited to one configured jobs folder. Operators must
   not point different launchers at different directories to evade a stuck lock.
 - Windows Sandbox CLI list/stop behavior and selected guest network/read-only isolation properties were measured live. Abrupt power-loss recovery and complete escape resistance remain unverified.
+- Manual recovery unit tests verify user SID mismatch, live controller PID,
+  active VM sessions, altered records, invalid list results, duplicate callers,
+  and typed consent. A synthetic local orphan was released on the real Chris
+  Windows host after two genuine empty WSB list queries; no VM was launched
+  for that fixture. Abrupt power-loss recovery remains untested.
 - The web UI has no VM launch, recovery or unlock API endpoints. Runtime
   Cloud providers remain disabled; this does not affect Office 2.0.
 
@@ -76,4 +87,7 @@ even if progress callbacks fail, test results are malformed, or the operator can
 src/sandbox/vm-journal.mjs
 src/sandbox/vm-controller.mjs
 scripts/manual-vm-runner.mjs
+src/sandbox/vm-recovery.mjs
+scripts/manual-vm-recovery.mjs
 test/vm-journal.test.mjs
+test/vm-recovery.test.mjs

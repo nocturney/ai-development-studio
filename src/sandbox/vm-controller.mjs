@@ -17,6 +17,7 @@ import { VmOwnershipJournal } from "./vm-journal.mjs";
 
 const execFileAsync = promisify(execFile);
 const VM_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const WINDOWS_SID_RE = /^S-1-\d+(?:-\d+){2,15}$/i;
 // Hard-coded guest command: no model output, project content or user arguments
 // may be interpolated into this command line.
 export const GUEST_RUNNER_COMMAND = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\StudioInput\\guest-runner.ps1";
@@ -105,6 +106,14 @@ async function defaultSessionProbe() {
   return /^\d{1,6}$/.test(value) ? Number(value) : 0;
 }
 
+async function defaultOperatorSidProbe() {
+  const output = await execFileAsync("powershell.exe", [
+    "-NoProfile", "-NonInteractive", "-Command",
+    "[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value"
+  ], { timeout: 6500, windowsHide: true, maxBuffer: 1000 });
+  return String(output.stdout ?? "").trim();
+}
+
 async function defaultExecutableProbe(executable) {
   // Microsoft Store App Execution Aliases are reparse points: fs.stat() can
   // fail even when "wsb --version" succeeds from the logged-on user.
@@ -127,12 +136,13 @@ export async function probeWindowsVm({
   username = os.userInfo().username,
   featureProbe = diagnoseSandbox,
   sessionProbe = defaultSessionProbe,
+  identityProbe = defaultOperatorSidProbe,
   executableProbe = defaultExecutableProbe,
   cliCandidates = windowsSandboxCliCandidates
 } = {}) {
   const base = {
     schema: VM_TEST_DRIVER, platform, featureState: "unknown",
-    session: "unverified", cliPresent: false,
+    session: "unverified", cliPresent: false, userSid: null,
     featureReady: false, executionEnabled: false, executable: null
   };
   if (platform !== "win32") return { ...base, reason: "windows-only" };
@@ -153,8 +163,14 @@ export async function probeWindowsVm({
   const candidates = cliCandidates();
   for (const executable of candidates) {
     if (await executableProbe(executable)) {
-      return { ...base, cliPresent: true, executable, featureReady: true,
-        reason: "explicit-approval-required" };
+      let sid = null;
+      try { sid = await identityProbe(); } catch { /* unverified operator */ }
+      if (!WINDOWS_SID_RE.test(sid)) {
+        return { ...base, cliPresent: true, executable,
+          reason: "operator-windows-sid-unavailable" };
+      }
+      return { ...base, cliPresent: true, executable, userSid: sid,
+        featureReady: true, reason: "explicit-approval-required" };
     }
   }
   return { ...base, reason: "sandbox-cli-not-installed" };
@@ -242,6 +258,9 @@ export async function runWindowsVmJob({
       ready.session !== "interactive" || !ready.cliPresent) {
     throw Error("vm-host-not-ready:" + String(ready?.reason || "unknown"));
   }
+  if (!WINDOWS_SID_RE.test(ready.userSid)) {
+    throw Error("vm-operator-windows-sid-required");
+  }
   const configPath = staged.configPath;
   if (typeof configPath !== "string" || !path.isAbsolute(configPath) ||
       typeof staged.outputDir !== "string" || !path.isAbsolute(staged.outputDir) ||
@@ -268,7 +287,8 @@ export async function runWindowsVmJob({
   };
   try {
     if (journal) {
-      await journal.claim({ vmId, jobId: staged.id, manifestHash: staged.manifestHash });
+      await journal.claim({ vmId, jobId: staged.id,
+        manifestHash: staged.manifestHash, ownerSid: ready.userSid });
       journalClaimed = true;
       await journal.transition(vmId, "launch-requested");
     }

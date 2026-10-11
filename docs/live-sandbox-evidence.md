@@ -123,3 +123,28 @@ D:\Velvet\Services\AIStudio\logs\vm-validation-20261011\bounded-output-v015.
 
 The VM did not run any model-written code, arbitrary shell instruction,
 user project, third-party dependency or Office 2.0 component.
+
+
+## 9. v0.0.16 owner-SID and synthetic orphan verification
+
+A new recovery safeguard records the Windows account SID alongside the VM
+identifier, job identifier and controlling process PID. Manual journal recovery
+refuses user-identity mismatches and legacy unbound records, even when the
+current user's Windows Sandbox session list is empty.
+
+A read-only test in the signed-in Chris session verified that the real
+WindowsIdentity SID resolves correctly, that Windows Sandbox is Enabled and
+that WSB list --raw returned zero sessions.
+
+A separate trusted simulation created a *synthetic* stop-unverified owner
+journal under D:\Velvet\Temp, using a child Node process under Chris, and
+let the child terminate. No VM was launched. The recovery inspector verified
+the original child PID was dead and the Windows SID matched. The recovery
+engine then performed two additional live WSB list queries and released only
+the synthetic lock after explicit fixture approval. It reported
+released=true, previousPhase=stop-unverified, originalControllerInactive=true,
+confirmedEmptyVmLists=2, and codeChangesApproved=false. No real Studio
+review or job record was changed.
+
+This is integration evidence for manual recovery logic, not an adversarial
+security audit and not an unattended or automatic orphan shutdown feature.
