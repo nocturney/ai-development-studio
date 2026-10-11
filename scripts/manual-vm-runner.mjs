@@ -7,7 +7,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
-import { probeWindowsVm, expectedVmApproval, runWindowsVmJob } from "../src/sandbox/vm-controller.mjs";
+import { probeWindowsVm, expectedVmApproval, runWindowsVmJob, manualVmExitStatus } from "../src/sandbox/vm-controller.mjs";
 import { stageOfflineRunnerJob } from "../src/sandbox/offline-runner.mjs";
 import { diagnoseSandbox } from "../src/sandbox/windows.mjs";
 import { VmOwnershipJournal } from "../src/sandbox/vm-journal.mjs";
@@ -109,8 +109,10 @@ try {
     jobId: staged.id, vmId: outcome.vmId, guestStatus: outcome.status,
     sandboxStopped: outcome.sandboxStopped,
     trusted: false, requiresHumanReview: true,
-    stdout: outcome.stdout, stderr: outcome.stderr
+    stdout: outcome.stdout, stderr: outcome.stderr,
+    operatorExitCode: manualVmExitStatus(outcome)
   }, null, 2));
+  process.exitCode = manualVmExitStatus(outcome);
 } finally {
   process.off("SIGINT", cancel);
   process.off("SIGTERM", cancel);

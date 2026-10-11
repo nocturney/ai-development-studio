@@ -76,6 +76,18 @@ export function windowsSandboxCliCandidates({
   return [...new Set(result.map(item => path.win32.normalize(item)))];
 }
 export const VM_APPROVAL_PREFIX = "RUN OFFLINE VM JOB ";
+
+// Exit status for the manual operator CLI, not a Git approval. A guest failure
+// can still be a valid untrusted report; it must not count as a successful
+// CLI operation. Always refuse incomplete or inconsistent result objects.
+export function manualVmExitStatus(outcome) {
+  return outcome?.status === "passed" &&
+    outcome?.exitCode === 0 &&
+    outcome?.sandboxStopped === true &&
+    outcome?.trusted === false &&
+    outcome?.requiresHumanReview === true &&
+    outcome?.acceptedForAutomaticApproval === false ? 0 : 2;
+}
 export const VM_TEST_DRIVER = "studio.vm-driver.v1";
 
 function isServiceAccount(username) {

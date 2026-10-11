@@ -54,34 +54,53 @@ try {
     $full = Join-Path $workDir ([string]$test).Replace('/', '\')
     if (!(Test-Path -LiteralPath $full -PathType Leaf)) { throw 'test-not-found' }
   }
-  $stdoutPath = Join-Path $env:TEMP ('studio-out-' + $job.id + '.txt')
-  $stderrPath = Join-Path $env:TEMP ('studio-err-' + $job.id + '.txt')
   $testNames = @($job.tests | ForEach-Object { [string]$_ })
   $arguments = @('--test', '--test-reporter=tap', '--test-concurrency=1') + $testNames
-  $process = Start-Process -FilePath $runtimePath -ArgumentList $arguments -WorkingDirectory $workDir -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
+  # Wait-Process + Start-Process -PassThru loses ExitCode on Windows PowerShell
+  # once the underlying handle closes. Casting that $null to int yields 0 and
+  # incorrectly marks failing tests as passed. Use an owned .NET process handle.
+  $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $startInfo.FileName = $runtimePath
+  $startInfo.Arguments = ($arguments -join ' ')
+  $startInfo.WorkingDirectory = $workDir
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+  $process = [System.Diagnostics.Process]::new()
+  $process.StartInfo = $startInfo
+  $started = $false
   try {
-    Wait-Process -Id $process.Id -Timeout ([int]$job.timeoutSeconds) -ErrorAction Stop
-    $process.Refresh()
-    $report.exitCode = [int]$process.ExitCode
-    $report.status = if ($report.exitCode -eq 0) { 'passed' } else { 'failed' }
-  } catch {
-    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-    $report.status = 'timeout'
-    $report.exitCode = -1
-  }
-  if (Test-Path -LiteralPath $stdoutPath) {
-    $value = Get-Content -LiteralPath $stdoutPath -Raw -Encoding UTF8
-    if ($null -ne $value) {
-      $report.stdout = [string]$value
-      if ($report.stdout.Length -gt 30000) { $report.stdout = $report.stdout.Substring(0, 30000) }
+    $started = $process.Start()
+    if (!$started) { throw 'test-process-not-started' }
+    # Drain both pipes concurrently so a noisy guest does not deadlock.
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $completed = $process.WaitForExit([int]$job.timeoutSeconds * 1000)
+    if (!$completed) {
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+      $report.status = 'timeout'
+      $report.exitCode = -1
+    } else {
+      $exit = $process.ExitCode
+      if ($null -eq $exit -or $exit -lt 0 -or $exit -gt 255) {
+        throw 'unavailable-test-exit-code'
+      }
+      $report.exitCode = [int]$exit
+      $report.status = if ($report.exitCode -eq 0) { 'passed' } else { 'failed' }
     }
-  }
-  if (Test-Path -LiteralPath $stderrPath) {
-    $value = Get-Content -LiteralPath $stderrPath -Raw -Encoding UTF8
-    if ($null -ne $value) {
-      $report.stderr = [string]$value
-      if ($report.stderr.Length -gt 30000) { $report.stderr = $report.stderr.Substring(0, 30000) }
+    if (!$stdoutTask.Wait(4000) -or !$stderrTask.Wait(4000)) {
+      throw 'test-output-not-drained'
     }
+    $report.stdout = [string]$stdoutTask.Result
+    $report.stderr = [string]$stderrTask.Result
+    if ($report.stdout.Length -gt 30000) { $report.stdout = $report.stdout.Substring(0, 30000) }
+    if ($report.stderr.Length -gt 30000) { $report.stderr = $report.stderr.Substring(0, 30000) }
+  } finally {
+    if ($started -and !$process.HasExited) {
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    }
+    $process.Dispose()
   }
 } catch {
   $report.status = 'error'
