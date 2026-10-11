@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "velvet.local-ai.capability.v0.1",
+  "projectId": "local3d",
+  "repository": "nocturney/local-3d-generator",
+  "upstreamCommit": "244577b1fb0264d295efe5121915903ac0a06ce6",
+  "declaredModes": [
+    "DEMO_FIXTURE_ONLY",
+    "TRIPOSR_MANUAL_PER_IMAGE_GATED",
+    "DRAFT_MESH_QA"
+  ],
+  "snapshot": {
+    "evidence": "GITHUB_CODE_ONLY",
+    "runtimeStatus": "UNKNOWN",
+    "hostVerified": false,
+    "port": null,
+    "hostIdentity": null
+  },
+  "policy": {
+    "localOnly": true,
+    "cloudFallback": "DISABLED",
+    "networkEgress": "NOT_AUTHORIZED",
+    "gpuInference": "PER_ASSET_APPROVAL_REQUIRED",
+    "vmExecution": "SEPARATE_OPERATOR_APPROVAL_REQUIRED",
+    "nativePlugins": "NOT_AUTHORIZED",
+    "arbitraryShell": "NOT_AUTHORIZED",
+    "jobSubmission": "NOT_AUTHORIZED",
+    "printer": "NOT_AUTHORIZED",
+    "humanReview": "REQUIRED"
+  },
+  "gpu": {
+    "leaseState": "UNKNOWN",
+    "approvedForInference": false
+  },
+  "result": {
+    "trusted": false,
+    "printQualified": false,
+    "approvedForPrinter": false,
+    "fabricationAction": "NONE"
+  },
+  "integration": {
+    "adapter": "NOT_IMPLEMENTED",
+    "sharedScheduler": false,
+    "jobSubmission": false
+  }
+}
