@@ -16,11 +16,11 @@ test("disabled Windows Sandbox stays fail-closed", async () => {
   assert.equal(state.requiresRestart, true);
 });
 
-test("even an enabled Windows Sandbox cannot execute until the trusted runner is implemented", async () => {
+test("an enabled Windows Sandbox still cannot bypass manual VM consent or use the web execution API", async () => {
   const state = await diagnoseSandbox({ platform: "win32", execFileImpl: async () => ({ stdout: "Enabled\r\n" }) });
   assert.equal(state.featureState, "Enabled");
   assert.equal(state.executionEnabled, false);
-  assert.equal(state.reason, "runner-not-yet-implemented");
+  assert.equal(state.reason, "manual-vm-controller-gated");
 });
 
 test("feature query failure always disables execution", async () => {
@@ -42,4 +42,63 @@ test("sandbox config requires drive-absolute mapped directory and conservative m
   assert.match(profile, /<ClipboardRedirection>Disable<\/ClipboardRedirection>/);
   assert.match(profile, /<MemoryInMB>6144<\/MemoryInMB>/);
   assert.match(profile, /<HostFolder>D:\\Pilot Source<\/HostFolder>/);
+});
+
+test("standard-user WMI reports Enabled state without relying on DISM elevation", async () => {
+  const commands = [];
+  const state = await diagnoseSandbox({
+    platform: "win32",
+    execFileImpl: async (exe, args) => {
+      commands.push(args[3]);
+      return { stdout: "1\r\n" };
+    }
+  });
+  assert.equal(state.featureState, "Enabled");
+  assert.equal(state.executionEnabled, false);
+  assert.equal(state.reason, "manual-vm-controller-gated");
+  assert.equal(commands.length, 1);
+  assert.match(commands[0], /Get-CimInstance/);
+});
+
+test("disabled and absent WMI feature states remain fail-closed", async () => {
+  for (const [number, expected] of [["2", "Disabled"], ["3", "Absent"]]) {
+    const state = await diagnoseSandbox({
+      platform: "win32",
+      execFileImpl: async () => ({ stdout: number })
+    });
+    assert.equal(state.featureState, expected);
+    assert.equal(state.executionEnabled, false);
+    assert.equal(state.requiresRestart, true);
+  }
+});
+
+test("when WMI is inaccessible, elevated DISM fallback can still diagnose Sandbox", async () => {
+  const called = [];
+  const state = await diagnoseSandbox({
+    platform: "win32",
+    execFileImpl: async (exe, args) => {
+      called.push(args[3]);
+      if (called.length === 1) throw Error("CIM provider unavailable");
+      return { stdout: "Enabled\n" };
+    }
+  });
+  assert.equal(state.featureState, "Enabled");
+  assert.equal(state.executionEnabled, false);
+  assert.equal(called.length, 2);
+  assert.match(called[1], /Get-WindowsOptionalFeature/);
+});
+
+test("unrecognized WMI and DISM output never authorizes execution", async () => {
+  let count = 0;
+  const result = await diagnoseSandbox({
+    platform: "win32",
+    execFileImpl: async () => {
+      count++;
+      return { stdout: "not-a-feature-state\n" };
+    }
+  });
+  assert.equal(count, 2);
+  assert.equal(result.featureState, "unknown");
+  assert.equal(result.executionEnabled, false);
+  assert.equal(result.reason, "feature-query-failed");
 });
