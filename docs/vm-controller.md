@@ -1,4 +1,4 @@
-# Windows Sandbox VM execution gate — v0.0.11
+# Windows Sandbox VM execution gate — v0.0.12
 
 ## Current status
 
@@ -7,9 +7,13 @@ preflight integrity verification, VM startup, completion polling, cancellation, 
 timeout, and VM shutdown. The VM lifecycle has been tested using mocked WSB CLI calls.
 **No actual Windows Sandbox VM has run**.
 
-Windows host inspection (October 9, 2026): Windows 11 Pro with Sandbox feature
-Disabled, Hyper-V Disabled, VirtualMachinePlatform Enabled. The remote service runs
-as NT AUTHORITY\SYSTEM. Sandbox binaries are not installed in this service context.
+Windows host inspection (October 11, 2026): Windows 11 Pro with the Windows Sandbox
+feature Enabled and Microsoft Store Windows Sandbox 0.8.107.0 installed. The official
+CLI is a per-user App Execution Alias under LOCALAPPDATA/Microsoft/WindowsApps/wsb.exe,
+not System32/wsb.exe. The remote service continues to run as NT AUTHORITY\SYSTEM and
+is deliberately rejected as noninteractive. From the logged-on Chris desktop session,
+a read-only probe verified the feature Enabled, the real CLI version, and
+featureReady=true without administrator elevation or a VM launch.
 
 Studio's HTTP app does NOT expose VM launch endpoints. Arbitrary project execution
 and host shell execution remain unavailable.
@@ -60,9 +64,12 @@ It exposes only a read-only input bundle and a dedicated writable result folder.
 - Guest success is not proof of secure code and never auto-approves source changes.
 - MemoryInMB controls sandbox allocation, not a calibrated per-process resource quota.
 - Never share credentials or real user projects with an unverified Sandbox Runner.
-- No virtualization features or security settings were changed; no restart was done.
-- Windows Sandbox is disabled on the connected host, and enabling it may require
-  a planned reboot. That is a distinct operational milestone.
+- Windows Sandbox was enabled and the machine restarted by the user. Studio did not
+  change virtualization features, security settings or UAC policy.
+- The new Store CLI is detected in the interactive user's WindowsApps directory, with
+  System32 as a fallback; the probe does not run arbitrary executables from PATH.
+- Read-only feature status uses Win32_OptionalFeature WMI, with DISM as a fallback.
+  WMI state 1 means Enabled; unrecognized or inaccessible states fail closed.
 
 ## Primary documentation
 

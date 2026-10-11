@@ -13,23 +13,34 @@ export async function diagnoseSandbox({
     return { platform, feature: SANDBOX_FEATURE, featureState: "not-windows",
       executionEnabled: false, reason: "unsupported-host", requiresRestart: false };
   }
-  try {
-    const result = await execFileImpl("powershell.exe", [
-      "-NoProfile", "-NonInteractive", "-Command",
-      '(Get-WindowsOptionalFeature -Online -FeatureName "Containers-DisposableClientVM" -ErrorAction Stop).State'
-    ], { timeout: 16000, windowsHide: true, maxBuffer: 8192 });
-    const state = String(result.stdout || "").trim().split(/\r?\n/).at(-1).trim();
-    const enabled = state === "Enabled";
-    return {
-      platform, feature: SANDBOX_FEATURE, featureState: state,
-      executionEnabled: false,
-      reason: enabled ? "runner-not-yet-implemented" : "windows-sandbox-not-enabled",
-      requiresRestart: !enabled
-    };
-  } catch {
-    return { platform, feature: SANDBOX_FEATURE, featureState: "unknown",
-      executionEnabled: false, reason: "feature-query-failed", requiresRestart: null };
+  // Win32_OptionalFeature can be queried from a standard interactive user.
+  // DISM's Get-WindowsOptionalFeature often requires elevation; keep it as a
+  // fallback when the CIM provider is unavailable or returns unknown data.
+  const commands = [
+    "$f=Get-CimInstance -ClassName Win32_OptionalFeature -Filter \"Name='Containers-DisposableClientVM'\" -ErrorAction Stop; if ($null -eq $f) { throw 'feature-not-found' }; $f.InstallState",
+    '(Get-WindowsOptionalFeature -Online -FeatureName "Containers-DisposableClientVM" -ErrorAction Stop).State'
+  ];
+  for (const command of commands) {
+    try {
+      const result = await execFileImpl("powershell.exe", [
+        "-NoProfile", "-NonInteractive", "-Command", command
+      ], { timeout: 16000, windowsHide: true, maxBuffer: 8192 });
+      const raw = String(result.stdout || "").trim().split(/\r?\n/).at(-1).trim();
+      const state = ({ "1": "Enabled", "2": "Disabled", "3": "Absent" })[raw] ?? raw;
+      if (!["Enabled", "Disabled", "Absent"].includes(state)) continue;
+      const enabled = state === "Enabled";
+      return {
+        platform, feature: SANDBOX_FEATURE, featureState: state,
+        executionEnabled: false,
+        reason: enabled ? "manual-vm-controller-gated" : "windows-sandbox-not-enabled",
+        requiresRestart: !enabled
+      };
+    } catch {
+      // Try the next read-only source. Never assume a feature is enabled.
+    }
   }
+  return { platform, feature: SANDBOX_FEATURE, featureState: "unknown",
+    executionEnabled: false, reason: "feature-query-failed", requiresRestart: null };
 }
 
 function encodeXml(value) {

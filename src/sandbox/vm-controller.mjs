@@ -17,9 +17,30 @@ import { VmOwnershipJournal } from "./vm-journal.mjs";
 
 const execFileAsync = promisify(execFile);
 const VM_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DEFAULT_WSB = path.win32.join(
-  process.env.SystemRoot || "C:\\Windows", "System32", "wsb.exe"
-);
+
+/**
+ * Do not execute arbitrary PATH results. The new Microsoft Store edition ships
+ * an App Execution Alias in the interactive user's WindowsApps directory; older
+ * installations may provide a System32 executable. Both are known OS locations.
+ */
+export function windowsSandboxCliCandidates({
+  localAppData = process.env.LOCALAPPDATA,
+  systemRoot = process.env.SystemRoot || "C:\\Windows"
+} = {}) {
+  const result = [];
+  function safeBase(value) {
+    return typeof value === "string" && /^[A-Za-z]:\\/.test(value) &&
+      value.length < 220 && !/[<>|"'*\0\r\n]/.test(value) &&
+      value.split("\\").every(part => part !== ".." && part !== ".");
+  }
+  if (safeBase(localAppData)) {
+    result.push(path.win32.join(localAppData, "Microsoft", "WindowsApps", "wsb.exe"));
+  }
+  if (safeBase(systemRoot)) {
+    result.push(path.win32.join(systemRoot, "System32", "wsb.exe"));
+  }
+  return [...new Set(result.map(item => path.win32.normalize(item)))];
+}
 export const VM_APPROVAL_PREFIX = "RUN OFFLINE VM JOB ";
 export const VM_TEST_DRIVER = "studio.vm-driver.v1";
 
@@ -39,9 +60,14 @@ async function defaultSessionProbe() {
 }
 
 async function defaultExecutableProbe(executable) {
+  // Microsoft Store App Execution Aliases are reparse points: fs.stat() can
+  // fail even when "wsb --version" succeeds from the logged-on user.
+  // A successful, parseable CLI response is more reliable than file metadata.
   try {
-    const file = await fs.stat(executable);
-    return file.isFile();
+    const response = await execFileAsync(executable, ["--version"], {
+      timeout: 6500, windowsHide: true, maxBuffer: 2000
+    });
+    return /^\d+\.\d+\.\d+(?:\.\d+)?$/.test(String(response.stdout ?? "").trim());
   } catch {
     return false;
   }
@@ -56,12 +82,12 @@ export async function probeWindowsVm({
   featureProbe = diagnoseSandbox,
   sessionProbe = defaultSessionProbe,
   executableProbe = defaultExecutableProbe,
-  executable = DEFAULT_WSB
+  cliCandidates = windowsSandboxCliCandidates
 } = {}) {
   const base = {
     schema: VM_TEST_DRIVER, platform, featureState: "unknown",
     session: "unverified", cliPresent: false,
-    featureReady: false, executionEnabled: false, executable
+    featureReady: false, executionEnabled: false, executable: null
   };
   if (platform !== "win32") return { ...base, reason: "windows-only" };
   if (isServiceAccount(username)) {
@@ -78,9 +104,14 @@ export async function probeWindowsVm({
   if (base.featureState !== "Enabled") {
     return { ...base, reason: "windows-sandbox-feature-not-enabled" };
   }
-  base.cliPresent = await executableProbe(executable);
-  if (!base.cliPresent) return { ...base, reason: "sandbox-cli-not-installed" };
-  return { ...base, featureReady: true, reason: "explicit-approval-required" };
+  const candidates = cliCandidates();
+  for (const executable of candidates) {
+    if (await executableProbe(executable)) {
+      return { ...base, cliPresent: true, executable, featureReady: true,
+        reason: "explicit-approval-required" };
+    }
+  }
+  return { ...base, reason: "sandbox-cli-not-installed" };
 }
 
 export function expectedVmApproval(staged) {
