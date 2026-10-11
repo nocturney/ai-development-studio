@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/velvet/local-ai/capability/v0.1",
+  "title": "Velvet local AI - static, non-authorizing capability declaration v0.1",
+  "description": "DOCUMENTATION CONTRACT ONLY. No runtime authorization, GPU permission, remote capability or active endpoint is asserted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "projectId", "repository", "upstreamCommit", "declaredModes", "snapshot", "policy", "gpu", "result", "integration"],
+  "properties": {
+    "schemaVersion": {"const": "velvet.local-ai.capability.v0.1"},
+    "projectId": {"enum": ["ai-development-studio", "local3d", "genex-integration-lab"]},
+    "repository": {"enum": ["nocturney/ai-development-studio", "nocturney/local-3d-generator", "genex-games/genex-desktop"]},
+    "upstreamCommit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "declaredModes": {"type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "items": {"enum": ["OLLAMA_LOCAL_CHAT_PILOT", "GIT_HUMAN_REVIEW_PILOT", "TRUSTED_WINDOWS_VM_FIXTURE_MANUAL", "DEMO_FIXTURE_ONLY", "TRIPOSR_MANUAL_PER_IMAGE_GATED", "DRAFT_MESH_QA", "UPSTREAM_CODE_REVIEW", "MCP_CONSENT_FIXTURE_TESTS"]}},
+    "snapshot": {"type": "object", "additionalProperties": false, "required": ["evidence", "runtimeStatus", "hostVerified", "port", "hostIdentity"], "properties": {"evidence": {"const": "GITHUB_CODE_ONLY"}, "runtimeStatus": {"const": "UNKNOWN"}, "hostVerified": {"const": false}, "port": {"type": "null"}, "hostIdentity": {"type": "null"}}},
+    "policy": {"type": "object", "additionalProperties": false, "required": ["localOnly", "cloudFallback", "networkEgress", "gpuInference", "vmExecution", "nativePlugins", "arbitraryShell", "jobSubmission", "printer", "humanReview"], "properties": {"localOnly": {"const": true}, "cloudFallback": {"const": "DISABLED"}, "networkEgress": {"const": "NOT_AUTHORIZED"}, "gpuInference": {"const": "PER_ASSET_APPROVAL_REQUIRED"}, "vmExecution": {"const": "SEPARATE_OPERATOR_APPROVAL_REQUIRED"}, "nativePlugins": {"const": "NOT_AUTHORIZED"}, "arbitraryShell": {"const": "NOT_AUTHORIZED"}, "jobSubmission": {"const": "NOT_AUTHORIZED"}, "printer": {"const": "NOT_AUTHORIZED"}, "humanReview": {"const": "REQUIRED"}}},
+    "gpu": {"type": "object", "additionalProperties": false, "required": ["leaseState", "approvedForInference"], "properties": {"leaseState": {"const": "UNKNOWN"}, "approvedForInference": {"const": false}}},
+    "result": {"type": "object", "additionalProperties": false, "required": ["trusted", "printQualified", "approvedForPrinter", "fabricationAction"], "properties": {"trusted": {"const": false}, "printQualified": {"const": false}, "approvedForPrinter": {"const": false}, "fabricationAction": {"const": "NONE"}}},
+    "integration": {"type": "object", "additionalProperties": false, "required": ["adapter", "sharedScheduler", "jobSubmission"], "properties": {"adapter": {"const": "NOT_IMPLEMENTED"}, "sharedScheduler": {"const": false}, "jobSubmission": {"const": false}}}
+  }
+}
