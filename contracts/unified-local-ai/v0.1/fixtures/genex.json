@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "velvet.local-ai.capability.v0.1",
+  "projectId": "genex-integration-lab",
+  "repository": "genex-games/genex-desktop",
+  "upstreamCommit": "459d705179e9fad35871a4e28bd1a6798a1cf00c",
+  "declaredModes": [
+    "UPSTREAM_CODE_REVIEW",
+    "MCP_CONSENT_FIXTURE_TESTS"
+  ],
+  "snapshot": {
+    "evidence": "GITHUB_CODE_ONLY",
+    "runtimeStatus": "UNKNOWN",
+    "hostVerified": false,
+    "port": null,
+    "hostIdentity": null
+  },
+  "policy": {
+    "localOnly": true,
+    "cloudFallback": "DISABLED",
+    "networkEgress": "NOT_AUTHORIZED",
+    "gpuInference": "PER_ASSET_APPROVAL_REQUIRED",
+    "vmExecution": "SEPARATE_OPERATOR_APPROVAL_REQUIRED",
+    "nativePlugins": "NOT_AUTHORIZED",
+    "arbitraryShell": "NOT_AUTHORIZED",
+    "jobSubmission": "NOT_AUTHORIZED",
+    "printer": "NOT_AUTHORIZED",
+    "humanReview": "REQUIRED"
+  },
+  "gpu": {
+    "leaseState": "UNKNOWN",
+    "approvedForInference": false
+  },
+  "result": {
+    "trusted": false,
+    "printQualified": false,
+    "approvedForPrinter": false,
+    "fabricationAction": "NONE"
+  },
+  "integration": {
+    "adapter": "NOT_IMPLEMENTED",
+    "sharedScheduler": false,
+    "jobSubmission": false
+  }
+}
