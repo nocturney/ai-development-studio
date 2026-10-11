@@ -5,10 +5,11 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HASH = /^[0-9a-f]{64}$/;
+const SID = /^S-1-\d+(?:-\d+){2,15}$/i;
 const PHASES = new Set([
   "reserved", "launch-requested", "running", "stopping",
   "stopped", "stop-unverified"
@@ -23,6 +24,13 @@ const TRANSITIONS = {
 };
 
 export const VM_JOURNAL_SCHEMA = "studio.vm-ownership.v1";
+
+export function vmOwnershipFingerprint(record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    throw Error("invalid-vm-owner-fingerprint-input");
+  }
+  return createHash("sha256").update(JSON.stringify(record)).digest("hex");
+}
 
 export class VmOwnershipJournal {
   constructor(root) {
@@ -50,6 +58,7 @@ export class VmOwnershipJournal {
     if (!item || item.schema !== VM_JOURNAL_SCHEMA ||
         !UUID.test(item.vmId) || !UUID.test(item.jobId) ||
         !HASH.test(item.manifestHash) || !PHASES.has(item.phase) ||
+        (item.ownerSid != null && !SID.test(item.ownerSid)) ||
         typeof item.startedAt !== "string" || typeof item.updatedAt !== "string") {
       throw Error("invalid-vm-owner-record");
     }
@@ -91,8 +100,9 @@ export class VmOwnershipJournal {
     }
   }
 
-  async claim({ vmId, jobId, manifestHash }) {
-    if (!UUID.test(vmId) || !UUID.test(jobId) || !HASH.test(manifestHash)) {
+  async claim({ vmId, jobId, manifestHash, ownerSid = null }) {
+    if (!UUID.test(vmId) || !UUID.test(jobId) || !HASH.test(manifestHash) ||
+        (ownerSid !== null && !SID.test(ownerSid))) {
       throw Error("invalid-vm-ownership-identity");
     }
     await this.checkSafeRoot({ create: true });
@@ -103,7 +113,7 @@ export class VmOwnershipJournal {
       throw error;
     }
     const record = {
-      schema: VM_JOURNAL_SCHEMA, vmId, jobId, manifestHash,
+      schema: VM_JOURNAL_SCHEMA, vmId, jobId, manifestHash, ownerSid,
       phase: "reserved", pid: process.pid,
       startedAt: new Date().toISOString(), updatedAt: new Date().toISOString()
     };
@@ -127,6 +137,40 @@ export class VmOwnershipJournal {
       await fs.rm(temporary, { force: true }).catch(() => {});
     }
     return next;
+  }
+
+  /**
+   * Only for the explicit, operator-verified recovery flow. The caller must
+   * independently prove the owning process is gone and the user's WSB session
+   * list is empty twice. This method still refuses any record change or extra
+   * content in the lock directory, and never starts/stops a VM.
+   */
+  async releaseAfterManualRecovery({ vmId, expectedFingerprint }) {
+    if (!UUID.test(vmId) || !HASH.test(expectedFingerprint)) {
+      throw Error("invalid-vm-recovery-identity");
+    }
+    const current = await this.read();
+    if (!current || current.vmId !== vmId ||
+        vmOwnershipFingerprint(current) !== expectedFingerprint) {
+      throw Error("vm-owner-record-changed-during-recovery");
+    }
+    const entries = await fs.readdir(this.lock);
+    if (entries.length !== 1 || entries[0] !== "owner.json") {
+      throw Error("vm-owner-lock-has-unexpected-content");
+    }
+    if (current.phase !== "stopped") {
+      const next = { ...current, phase: "stopped",
+        updatedAt: new Date().toISOString(),
+        manuallyRecoveredAt: new Date().toISOString() };
+      const temporary = path.join(this.lock, ".owner-" + randomUUID() + ".tmp");
+      try {
+        await fs.writeFile(temporary, JSON.stringify(next, null, 2), { flag: "wx" });
+        await fs.rename(temporary, this.record);
+      } finally {
+        await fs.rm(temporary, { force: true }).catch(() => {});
+      }
+    }
+    return this.releaseStopped(vmId);
   }
 
   async releaseStopped(vmId) {

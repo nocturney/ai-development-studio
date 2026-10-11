@@ -1,4 +1,4 @@
-# Windows Sandbox VM execution gate — v0.0.15
+# Windows Sandbox VM execution gate — v0.0.16
 
 ## Current state
 
@@ -29,7 +29,7 @@ The manual command stages the sample, prints its unique ID and SHA-256 manifest 
 1. Deny service accounts and Session 0. Detect the user-local Store App Execution Alias (fallback: System32 only) and verify its version.
 2. Diagnose the Windows Sandbox feature using Win32_OptionalFeature WMI, with DISM fallback. Unknown state fails closed.
 3. Validate explicit approval, runtime staging, source checksums, guest script, guest Node binary, exact source inventory, and the XML profile.
-4. Acquire an atomic per-operator VM ownership lock and write the VM ID and job ID before launch.
+4. Acquire an atomic per-operator VM ownership lock and write the VM ID, job ID and OS-verified Windows account SID before launch. An unavailable SID blocks launch.
 5. Start the exact VM with wsb start --id and offline XML config. Mount only a read-only bundle at C:\StudioInput and one dedicated writable output directory at C:\StudioResults. Disable networking, virtual GPU, clipboard and redirections.
 6. Do not rely on LogonCommand. In the headless CLI it was observed not to run automatically without guest logon. Invoke the **fixed** PowerShell guest harness using wsb exec --run-as System with a single --command string.
 7. Require the CLI's structured ExitCode 0 response. Read the separately written guest result.json and validate its job ID, digest, fields and size. Guest results remain trusted=false, requiresHumanReview=true, with no automatic approval.
@@ -64,7 +64,7 @@ certification, or enable arbitrary app project execution.
 
 ## Known limitations
 
-- Crash/reboot during VM startup or teardown can leave an orphan. The journal will block future launches; a fully verified interactive recovery/unlock flow is not yet shipped.
+- Crash/reboot during VM startup or teardown can leave an orphan. The journal blocks launches until the original VM is stopped. A conservative CLI-only manual recovery now requires the same Windows SID, the original PID demonstrably absent, two fresh WSB lists with zero sessions, an unchanged record and exact typed consent. Legacy pre-v0.0.16 records without SID remain locked; automated orphan stop, cross-directory scheduling and reboot-failure testing are not implemented.
 - Cross-process locks protect one designated jobs folder, not multiple deliberately different folders.
 - WSB memory allocation is not a calibrated per-process RAM or CPU quota.
 - Guest stdout is not streamed by wsb exec; tests write bounded logs to their dedicated result file. The v0.0.15 guest collector independently streams stdout/stderr into small buffers, stops execution on the 8,000-per-stream / 9,000-total character budget, and returns a fail-closed error; this was verified with a real output-flooding guest VM.

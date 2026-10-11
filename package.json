@@ -1,6 +1,6 @@
 {
   "name": "ai-development-studio",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "private": true,
   "type": "module",
   "description": "Standalone local-first AI development studio prototype",
@@ -10,6 +10,7 @@
     "agent:pilot": "node src/agent-demo.mjs",
     "runner:prepare": "node scripts/manual-prepare-runner.mjs",
     "runner:vm-readiness": "node scripts/manual-vm-runner.mjs --status",
+    "runner:vm-recovery": "node scripts/manual-vm-recovery.mjs",
     "runner:vm-demo": "node scripts/manual-vm-runner.mjs --run-demo",
     "providers": "node src/cli.mjs providers",
     "test": "node --test && node scripts/check-ui.mjs && node --check src/server.mjs"

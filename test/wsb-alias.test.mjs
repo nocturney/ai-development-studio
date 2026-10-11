@@ -5,6 +5,7 @@ import { windowsSandboxCliCandidates, probeWindowsVm } from "../src/sandbox/vm-c
 const local = "C:\\Users\\Chris\\AppData\\Local";
 const alias = "C:\\Users\\Chris\\AppData\\Local\\Microsoft\\WindowsApps\\wsb.exe";
 const system = "C:\\Windows\\System32\\wsb.exe";
+const SID = "S-1-5-21-101-202-303-1001";
 
 test("CLI candidates prefer the Microsoft Store user alias and allow System32 fallback", () => {
   const candidates = windowsSandboxCliCandidates({ localAppData: local, systemRoot: "C:\\Windows" });
@@ -33,6 +34,7 @@ test("interactive readiness accepts tested Store CLI alias and never tries unrel
     platform: "win32",
     username: "Chris",
     sessionProbe: async () => 1,
+    identityProbe: async () => SID,
     featureProbe: async () => ({ featureState: "Enabled" }),
     cliCandidates: () => windowsSandboxCliCandidates({
       localAppData: local, systemRoot: "C:\\Windows"
@@ -54,6 +56,7 @@ test("interactive readiness falls back to System32 only after unavailable alias"
   const state = await probeWindowsVm({
     platform: "win32", username: "Chris",
     sessionProbe: async () => 1,
+    identityProbe: async () => SID,
     featureProbe: async () => ({ featureState: "Enabled" }),
     cliCandidates: () => [alias, system],
     executableProbe: async executable => {
@@ -70,6 +73,7 @@ test("invalid or missing executables remain unavailable and do not allow VM exec
   const state = await probeWindowsVm({
     platform: "win32", username: "Chris",
     sessionProbe: async () => 1,
+    identityProbe: async () => SID,
     featureProbe: async () => ({ featureState: "Enabled" }),
     cliCandidates: () => [alias, system],
     executableProbe: async () => false
@@ -91,4 +95,19 @@ test("noninteractive or service identity is rejected before any CLI invocation",
   });
   assert.equal(state.reason, "interactive-user-required");
   assert.equal(called, false);
+});
+
+test("unverifiable Windows SID blocks manual VM launch even with a valid CLI alias", async()=>{
+  const state=await probeWindowsVm({
+    platform:"win32",username:"Chris",
+    sessionProbe:async()=>1,
+    featureProbe:async()=>({featureState:"Enabled"}),
+    cliCandidates:()=>[alias],
+    executableProbe:async()=>true,
+    identityProbe:async()=> "not-a-windows-sid"
+  });
+  assert.equal(state.featureReady,false);
+  assert.equal(state.executionEnabled,false);
+  assert.equal(state.userSid,null);
+  assert.equal(state.reason,"operator-windows-sid-unavailable");
 });
