@@ -2,7 +2,7 @@
 
 Standalone, local-first AI development studio. Independent repository, runtime and releases; **not an Office 2.0 component**.
 
-**Current build: v0.0.14 research prototype.** Local model chat plus two tested, **restricted** tool-using agent pilots, Git worktree review, safe static preview, run cancellation, and crash recovery. This is **not** a general-purpose Dyad replacement, a secure production execution sandbox, or an unrestricted developer agent.
+**Current build: v0.0.15 research prototype.** Local model chat plus two tested, **restricted** tool-using agent pilots, Git worktree review, safe static preview, run cancellation, and crash recovery. This is **not** a general-purpose Dyad replacement, a secure production execution sandbox, or an unrestricted developer agent.
 
 ## Run on Windows
 
@@ -30,6 +30,7 @@ Open **http://127.0.0.1:4178** on the **same machine**; the service binds only t
 - **Recovery:** eight-minute agent deadline, per-inference timeouts, review heartbeats and conservative recovery of stale, interrupted runs. Existing pending/approved reviews are preserved.
 - **Sandbox diagnostics:** read-only Windows Sandbox feature-state report. **Generated-code execution stays disabled even if Windows Sandbox is installed.**
 - **Offline runner staging and manual VM gate:** stages SHA-256-verified Node test bundles under one read-only Windows Sandbox input mapping, with an isolated writable result folder and networking disabled. A signed-in Windows user can launch only the predefined addition-test demo via a separate CLI after exact per-job typed consent. The controller now uses headless `wsb exec --run-as System` rather than relying on guest logon, validates the returned exit code and guest report, and verifies the VM disappears from `wsb list` before releasing ownership. A **trusted, hard-coded sample** was actually executed in Windows Sandbox on October 11, 2026 and passed 1/1 tests. The browser/Agent still cannot launch VMs or execute arbitrary project code.
+- **Bounded guest output:** the offline VM runner now drains test stdout/stderr concurrently in fixed-size chunks, with a hard 8,000-character cap per stream and 9,000 combined. Exceeding the limit terminates the test and returns an untrusted error, not a successful or truncated test result. The collection script is independently sealed and verified during preflight. Real passing, failing and output-flooding VM fixtures passed.
 - **Fail-closed manual VM process exit:** a guest report of `failed`, `timeout` or `error` causes a nonzero operator CLI exit code even if the VM stopped correctly. Only a validated, passing, non-automergeable guest report after confirmed VM stop allows CLI exit 0; that still never approves source changes.
 - **External review storage (opt-in):** set `STUDIO_DATA_ROOT` to an absolute directory to persist Git-review pilot data separately from the checkout; the default legacy location is unchanged. No automatic migration is attempted.
 

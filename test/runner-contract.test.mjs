@@ -88,6 +88,7 @@ test("stage a sealed package and XML without launching Windows Sandbox or execut
     assert.equal(manifest.manifestHash, packageInfo.manifestHash);
     assert.equal(await fs.readFile(path.join(jobDir, "bundle", "source", "src", "sum.mjs"), "utf8"), SAMPLES["src/sum.mjs"]);
     assert.equal(await fs.stat(path.join(jobDir, "bundle", "guest-runner.ps1")).then(x => x.isFile()), true);
+    assert.equal(await fs.stat(path.join(jobDir, "bundle", "guest-bounded-process.ps1")).then(x => x.isFile()), true);
     const profile = await fs.readFile(packageInfo.configPath, "utf8");
     assert.match(profile, /<Networking>Disable<\/Networking>/);
     assert.equal(await fs.readdir(packageInfo.outputDir).then(xs => xs.length), 0);
