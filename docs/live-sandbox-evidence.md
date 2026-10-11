@@ -66,3 +66,33 @@ Production hardening still needs robust crash recovery, strict staging ACLs and 
 Official Microsoft references:
 https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-cli
 https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-configure-using-wsb-file
+
+
+## 7. Negative and positive fixtures after exit-code bug correction
+
+An intentionally failing arithmetic assertion (add(2,3) === 6) was staged,
+verified, and executed in the actual offline Sandbox. TAP reported one failed
+test. The initial run revealed that Windows PowerShell Start-Process with
+Wait-Process loses the child ExitCode after the process handle closes; the
+harness conversion of null to integer had incorrectly reported zero. The host
+had therefore accepted an incorrect passed status.
+
+The guest now uses an owned System.Diagnostics.Process, async drainage of
+both output streams, a bounded execution wait and explicit ExitCode reads.
+The corrected negative fixture produced:
+- Job: 5de073ea-70dd-4fa6-b53b-75b339806aa1.
+- VM: 71e69952-014a-4ef7-907a-ec1d99a459f3.
+- TAP fail 1, guest status=failed, exitCode=1, operator classification 2.
+- sandboxStopped=true, trusted=false, requiresHumanReview=true, no automatic approval.
+- Persistent ownership journal inactive after verified VM teardown.
+
+A separate corrected passing fixture then produced:
+- Job: fd46a92a-f221-4866-a62a-9712cbf3b588.
+- VM: bb1f064e-1466-4eec-bdcd-575eccf43dac.
+- TAP pass 1, guest status=passed, exitCode=0, operator classification 0.
+- VM stopped and unlisted; ownership journal inactive; report remains untrusted.
+
+Original and corrected driver, guest, and manifest JSON evidence is retained at
+D:\Velvet\Services\AIStudio\logs\vm-validation-20261011. These are
+trusted hard-coded arithmetic fixtures only, not arbitrary model-generated
+program execution. GUI/Agent VM invocation remains disabled.

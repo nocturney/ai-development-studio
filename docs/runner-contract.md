@@ -1,4 +1,4 @@
-# Studio offline runner contract — v0.0.13
+# Studio offline runner contract — v0.0.14
 
 **Status: actual Windows Sandbox lifecycle, guest isolation probe, and trusted Node test fixture verified. Arbitrary project-code execution remains disabled in the app.**
 
@@ -30,6 +30,7 @@
 - MemoryInMB is not a calibrated per-process memory/CPU quota. No CPU limits, dependency installation, malicious breakout resistance or production security audit have been proven.
 - Microsoft documents that wsb exec does not stream guest stdout/stderr; reports are written to the isolated output mapping.
 - There is no automatic VM orphan recovery or journal removal after uncertain stop.
+- The manually approved CLI must exit with a nonzero process code for guest `failed`, `timeout` or `error` outcomes, even if teardown succeeds. This classifies test results only; guest reports remain untrusted and never approve code.
 - No Office 2.0 dependency, cloud model fallback, model-generated shell execution or paid agent runtime was added.
 
 ## Operator commands

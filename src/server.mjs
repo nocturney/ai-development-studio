@@ -111,7 +111,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { cloudEnabled: false, catalog: PROVIDER_CATALOG, instances: await scanOllama() });
     }
     if (req.method === "GET" && req.url === "/api/health") {
-      return json(res, 200, { name: "ai-development-studio", version: "0.0.13", cloudEnabled: false, status: "prototype", storageMode: reviewStore.storageMode });
+      return json(res, 200, { name: "ai-development-studio", version: "0.0.14", cloudEnabled: false, status: "prototype", storageMode: reviewStore.storageMode });
     }
     if (req.method === "GET" && req.url === "/api/sandbox/diagnostic") {
       const [state, controller] = await Promise.all([diagnoseSandbox(), probeWindowsVm()]);

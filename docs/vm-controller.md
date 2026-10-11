@@ -1,4 +1,4 @@
-# Windows Sandbox VM execution gate — v0.0.13
+# Windows Sandbox VM execution gate — v0.0.14
 
 ## Current state
 
@@ -35,6 +35,7 @@ The manual command stages the sample, prints its unique ID and SHA-256 manifest 
 7. Require the CLI's structured ExitCode 0 response. Read the separately written guest result.json and validate its job ID, digest, fields and size. Guest results remain trusted=false, requiresHumanReview=true, with no automatic approval.
 8. On success, error, abort or timeout, request wsb stop for the exact VM ID.
 9. After stopping, call wsb list --raw and require that the VM is absent before marking it stopped and releasing the ownership lock. If CLI stop or list cannot be verified, retain stop-unverified state and surface the ID for manual investigation.
+10. The interactive manual operator CLI returns process exit 2 for a guest test failure, timeout, malformed or unconfirmed result. A valid passing test after confirmed VM stop returns process exit 0, without approving code, changing its untrusted status or bypassing human review.
 
 ## Real Windows checks (October 11, 2026)
 
@@ -43,7 +44,23 @@ The manual command stages the sample, prints its unique ID and SHA-256 manifest 
 - A fixed sample Node.js test added two numbers and passed 1/1 tests within a VM. The guest report initially showed stderr:null when the error file was empty; the host correctly rejected that schema. The guest writer was fixed to retain empty strings, and the next real run passed with exitCode=0, trusted=false and sandboxStopped=true. The ownership journal was empty afterwards.
 - The controller now also protects against the subtle case in which wsb stop returns success but wsb list still shows the VM. Tests preserve the lock in that case.
 
-These checks prove the configured host integration works for the trusted sample and measured isolation properties. They **do not** prove all Sandbox escape techniques are impossible, offer a malware security certification, or enable arbitrary app project execution.
+An additional **negative-test drill** on October 11 revealed a fail-open status bug:
+Windows PowerShell's Start-Process/Wait-Process combination returned a null
+ExitCode after the handle was released; converting it to integer yielded 0.
+The guest test log correctly contained TAP fail 1, but the guest reported
+status passed. The host had no basis to distinguish it from valid success.
+The guest harness now owns a .NET Process handle, waits with a timeout,
+captures the actual ExitCode, and refuses missing/invalid codes. A second
+real VM run of the same deliberately failing assertion yielded TAP fail 1,
+guest status failed, ExitCode 1 and manual operator exit 2, while VM stop and
+journal cleanup succeeded. A new real passing assertion also yielded TAP
+pass 1, guest status passed, ExitCode 0, operator exit 0 and verified stop.
+Both results are still untrusted and never auto-approve project changes.
+
+These checks prove the configured host integration works for trusted positive
+and negative samples and measured isolation properties. They **do not** prove
+all Sandbox escape techniques are impossible, offer a malware security
+certification, or enable arbitrary app project execution.
 
 ## Known limitations
 
