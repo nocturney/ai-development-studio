@@ -5,12 +5,14 @@ import { VmOwnershipJournal } from "../src/sandbox/vm-journal.mjs";
 import os from "node:os";
 import path from "node:path";
 import {
-  probeWindowsVm, runWindowsVmJob, expectedVmApproval, VM_TEST_DRIVER
+  probeWindowsVm, runWindowsVmJob, expectedVmApproval, VM_TEST_DRIVER,
+  GUEST_RUNNER_COMMAND, parseSandboxExecAcknowledgement, parseSandboxListResponse
 } from "../src/sandbox/vm-controller.mjs";
 
 const ID = "3a2c95b6-6165-4c96-a39c-61a1d7d38c44";
 const VM_ID = "55c870e1-2a40-482c-84a8-98f78acebb29";
 const HASH = "a".repeat(64);
+const LIST_JSON = '{"WindowsSandboxEnvironments":[]}';
 
 async function withPrepared(run) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "studio-vm-controller-"));
@@ -27,7 +29,7 @@ async function withPrepared(run) {
   const calls = [];
   const fakeVM = async (binary, args) => {
     calls.push({ binary, args });
-    return { stdout: "", stderr: "" };
+    return { stdout: args[0] === "exec" ? '{"ExitCode":0}' : args[0] === "list" ? LIST_JSON : "", stderr: "" };
   };
   const goodRecord = JSON.stringify({
     schema: "studio.runner.v1", id: ID, manifestHash: HASH,
@@ -36,7 +38,7 @@ async function withPrepared(run) {
   const args = {
     staged, journal: new VmOwnershipJournal(path.join(root, "jobs")),
     approval: expectedVmApproval(staged), executionOptIn: true,
-    interactiveConfirmation: true, vmId: VM_ID, startupGraceMs: 1000,
+    interactiveConfirmation: true, vmId: VM_ID, startupGraceMs: 1000, guestBootWaitMs: 0,
     readinessProbe: async () => ({
       schema: VM_TEST_DRIVER, platform: "win32", session: "interactive",
       cliPresent: true, featureReady: true, executable: "C:\\Windows\\System32\\wsb.exe"
@@ -120,11 +122,13 @@ test("safe driver starts exact configured VM, accepts only untrusted result and 
     assert.equal(result.sandboxStopped, true);
     assert.equal(result.requiresHumanReview, true);
     assert.equal(result.acceptedForAutomaticApproval, false);
-    assert.deepEqual(calls.map(x => x.args.slice(0, 2)), [["start", "--id"], ["stop", "--id"]]);
+    assert.deepEqual(calls.map(x => x.args.slice(0, 2)), [["start", "--id"], ["exec", "--id"], ["stop", "--id"], ["list", "--raw"]]);
     assert.equal(calls[0].args[2], VM_ID);
     assert.equal(calls[0].args[3], "--config");
     assert.ok(calls[0].args[4].includes("<Networking>Disable</Networking>"));
-    assert.deepEqual(calls[1].args, ["stop", "--id", VM_ID]);
+    assert.deepEqual(calls[1].args, ["exec", "--id", VM_ID, "--command", GUEST_RUNNER_COMMAND, "--run-as", "System", "--raw"]);
+    assert.deepEqual(calls[2].args, ["stop", "--id", VM_ID]);
+    assert.deepEqual(calls[3].args, ["list", "--raw"]);
     assert.equal(calls[0].binary, "C:\\Windows\\System32\\wsb.exe");
   });
 });
@@ -146,7 +150,7 @@ test("untrusted malformed guest result fails and still stops sandbox", async () 
     await assert.rejects(runWindowsVmJob({
       ...args, reportReader: async () => JSON.stringify({ status: "passed", stdout: "fake" })
     }), /invalid-runner-result/);
-    assert.deepEqual(calls.map(x => x.args[0]), ["start", "stop"]);
+    assert.deepEqual(calls.map(x => x.args[0]), ["start", "exec", "stop", "list"]);
   });
 });
 
@@ -158,7 +162,7 @@ test("timed-out guest report forces VM stop and never returns success", async ()
       wait: async ms => { time += ms; },
       reportReader: async () => null
     }), /vm-guest-report-timeout/);
-    assert.deepEqual(calls.map(x => x.args[0]), ["start", "stop"]);
+    assert.deepEqual(calls.map(x => x.args[0]), ["start", "exec", "stop", "list"]);
   });
 });
 
@@ -173,7 +177,7 @@ test("abort while polling requests sandbox termination", async () => {
         controller.signal.throwIfAborted();
       }
     }), /operator-cancelled/);
-    assert.deepEqual(calls.map(x => x.args[0]), ["start", "stop"]);
+    assert.deepEqual(calls.map(x => x.args[0]), ["start", "exec", "stop", "list"]);
   });
 });
 
@@ -183,9 +187,10 @@ test("start failure is followed by best-effort stop of known VM ID", async () =>
       ...args, vmCommand: async (binary, arguments_) => {
         calls.push({ binary, args: arguments_ });
         if (arguments_[0] === "start") throw Error("simulated-boot-failure");
+        return { stdout: arguments_[0] === "list" ? LIST_JSON : "" };
       }
     }), /simulated-boot-failure/);
-    assert.deepEqual(calls.map(x => x.args[0]), ["start", "stop"]);
+    assert.deepEqual(calls.map(x => x.args[0]), ["start", "stop", "list"]);
   });
 });
 
@@ -195,7 +200,7 @@ test("cannot claim completion when VM stop confirmation fails", async () => {
       ...args,
       vmCommand: async (binary, commandArgs) => {
         if (commandArgs[0] === "stop") throw Error("simulated-stop-failure");
-        return { stdout: "" };
+        return { stdout: commandArgs[0] === "exec" ? '{"ExitCode":0}' : commandArgs[0] === "list" ? LIST_JSON : "" };
       }
     }), /vm-stop-not-confirmed/);
   });
@@ -217,7 +222,7 @@ test("event callback failure never prevents VM stop or truthful result", async (
       onEvent: () => { throw Error("unreliable-UI-listener"); }
     });
     assert.equal(result.sandboxStopped, true);
-    assert.deepEqual(calls.map(c => c.args[0]), ["start", "stop"]);
+    assert.deepEqual(calls.map(c => c.args[0]), ["start", "exec", "stop", "list"]);
   });
 });
 
@@ -238,15 +243,16 @@ test("real result-file reader consumes staged result without trusting the guest"
       ...rest,
       vmCommand: async (exe, argv) => {
         calls.push({ binary: exe, args: argv });
-        if (argv[0] === "start") {
+        if (argv[0] === "exec") {
           await fs.writeFile(path.join(args.staged.outputDir, "result.json"), goodRecord);
         }
+        return { stdout: argv[0] === "exec" ? '{"ExitCode":0}' : argv[0] === "list" ? LIST_JSON : "" };
       }
     });
     assert.equal(result.status, "passed");
     assert.equal(result.trusted, false);
     assert.equal(result.sandboxStopped, true);
-    assert.deepEqual(calls.map(c => c.args[0]), ["start", "stop"]);
+    assert.deepEqual(calls.map(c => c.args[0]), ["start", "exec", "stop", "list"]);
   });
 });
 
@@ -257,12 +263,13 @@ test("result-size violation is rejected and still triggers VM stop", async () =>
       ...rest,
       vmCommand: async (exe, argv) => {
         calls.push({ binary: exe, args: argv });
-        if (argv[0] === "start") {
+        if (argv[0] === "exec") {
           await fs.writeFile(path.join(args.staged.outputDir, "result.json"), "X".repeat(70001));
         }
+        return { stdout: argv[0] === "exec" ? '{"ExitCode":0}' : argv[0] === "list" ? LIST_JSON : "" };
       }
     }), /unsafe-vm-result/);
-    assert.deepEqual(calls.map(c => c.args[0]), ["start", "stop"]);
+    assert.deepEqual(calls.map(c => c.args[0]), ["start", "exec", "stop", "list"]);
   });
 });
 
@@ -271,5 +278,98 @@ test("any VM execution entrypoint must supply a durable ownership journal", asyn
     await assert.rejects(runWindowsVmJob({ ...args, journal: null }),
       /vm-ownership-journal-required/);
     assert.equal(calls.length, 0);
+  });
+});
+
+test("Sandbox exec CLI acknowledgement must be parseable, bounded and successful", () => {
+  assert.equal(parseSandboxExecAcknowledgement('{"ExitCode":0}'), 0);
+  for (const raw of ["", "success", "{}", "[]", '{"ExitCode":"0"}',
+    '{"ExitCode":-1}', '{"ExitCode":256}', "x".repeat(2100)]) {
+    assert.throws(() => parseSandboxExecAcknowledgement(raw), /invalid-sandbox-exec-response/);
+  }
+  assert.throws(() => parseSandboxExecAcknowledgement('{"ExitCode":7}'),
+    /sandbox-guest-command-failed/);
+});
+
+test("nonzero CLI guest exit is fatal and VM is stopped without trusting guest report", async () => {
+  await withPrepared(async ({ args, calls }) => {
+    await assert.rejects(runWindowsVmJob({
+      ...args, vmCommand: async (exe, argv) => {
+        calls.push({ binary: exe, args: argv });
+        return { stdout: argv[0] === "exec" ? '{"ExitCode":1}' : argv[0] === "list" ? LIST_JSON : "" };
+      }
+    }), /sandbox-guest-command-failed/);
+    assert.deepEqual(calls.map(c => c.args[0]), ["start", "exec", "stop", "list"]);
+    assert.equal((await args.journal.inspect()).active, false);
+  });
+});
+
+test("ambiguous VM exec CLI failure is not retried or auto-approved", async () => {
+  await withPrepared(async ({ args, calls }) => {
+    await assert.rejects(runWindowsVmJob({
+      ...args, vmCommand: async (exe, argv) => {
+        calls.push({ binary: exe, args: argv });
+        if (argv[0] === "exec") throw Error("cli-execution-not-confirmed");
+        return { stdout: argv[0] === "list" ? LIST_JSON : "" };
+      }
+    }), /cli-execution-not-confirmed/);
+    assert.deepEqual(calls.map(c => c.args[0]), ["start", "exec", "stop", "list"]);
+  });
+});
+
+test("cancellation before guest exec never launches guest command and requests VM stop", async () => {
+  await withPrepared(async ({ args, calls }) => {
+    const controller = new AbortController();
+    await assert.rejects(runWindowsVmJob({
+      ...args, signal: controller.signal, guestBootWaitMs: 100,
+      wait: async () => {
+        controller.abort(new DOMException("cancel-before-guest-exec", "AbortError"));
+        controller.signal.throwIfAborted();
+      }
+    }), /cancel-before-guest-exec/);
+    assert.deepEqual(calls.map(c => c.args[0]), ["start", "stop", "list"]);
+  });
+});
+
+test("WSB list JSON is bounded and validates VM identifiers before trusting stop", () => {
+  assert.deepEqual([...parseSandboxListResponse(LIST_JSON)], []);
+  const occupied = JSON.stringify({WindowsSandboxEnvironments: [{Id: VM_ID}]});
+  assert.equal(parseSandboxListResponse(occupied).has(VM_ID.toLowerCase()), true);
+  for (const invalid of ["", "null", "{}", "[]",
+    '{"WindowsSandboxEnvironments":[{"Id":"not-a-vm-id"}]}',
+    "x".repeat(21000)]) {
+    assert.throws(() => parseSandboxListResponse(invalid), /invalid-sandbox-list-response/);
+  }
+});
+
+test("WSB stop exit 0 is insufficient if the same VM remains listed", async () => {
+  await withPrepared(async ({ args, calls }) => {
+    const occupied = JSON.stringify({WindowsSandboxEnvironments: [{Id: VM_ID}]});
+    await assert.rejects(runWindowsVmJob({
+      ...args,
+      wait: async () => {},
+      vmCommand: async (exe, argv) => {
+        calls.push({ binary: exe, args: argv });
+        return {stdout: argv[0] === "exec" ? '{"ExitCode":0}' :
+          argv[0] === "list" ? occupied : "" };
+      }
+    }), /vm-stop-not-confirmed/);
+    assert.deepEqual(calls.map(x => x.args[0]),
+      ["start", "exec", "stop", "list", "list", "list"]);
+    const journal = await args.journal.inspect();
+    assert.equal(journal.status, "stop-unverified");
+    assert.equal(journal.vmId, VM_ID);
+  });
+});
+
+test("invalid WSB list JSON keeps VM ownership locked for inspection", async () => {
+  await withPrepared(async ({ args }) => {
+    await assert.rejects(runWindowsVmJob({
+      ...args,
+      vmCommand: async (exe, argv) =>
+        ({stdout: argv[0] === "exec" ? '{"ExitCode":0}' :
+          argv[0] === "list" ? "not-json" : ""})
+    }), /vm-stop-not-confirmed/);
+    assert.equal((await args.journal.inspect()).status, "stop-unverified");
   });
 });

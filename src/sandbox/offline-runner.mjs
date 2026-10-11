@@ -60,7 +60,6 @@ export function createOfflineRunnerProfile({ inputHostFolder, outputHostFolder, 
     "    <MappedFolder><HostFolder>" + source + "</HostFolder><SandboxFolder>C:\\StudioInput</SandboxFolder><ReadOnly>true</ReadOnly></MappedFolder>",
     "    <MappedFolder><HostFolder>" + result + "</HostFolder><SandboxFolder>C:\\StudioResults</SandboxFolder><ReadOnly>false</ReadOnly></MappedFolder>",
     "  </MappedFolders>",
-    "  <LogonCommand><Command>powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\StudioInput\\guest-runner.ps1</Command></LogonCommand>",
     "</Configuration>"
   ].join("\n") + "\n";
 }

@@ -9,6 +9,7 @@ import { runWindowsVmJob, expectedVmApproval } from "../src/sandbox/vm-controlle
 const JOB_ID = "24a8e2b5-6c01-49d0-b0c9-144cf924113f";
 const VM_ID = "00c55d38-4270-4c6a-8c07-27e6a444d4a2";
 const HASH = "a".repeat(64);
+const LIST_JSON = '{"WindowsSandboxEnvironments":[]}';
 
 async function fixture(run) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "studio-vm-owner-"));
@@ -120,7 +121,7 @@ async function withSimulatedVM(run) {
     const args = {
       staged, journal, vmId: VM_ID,
       approval: expectedVmApproval(staged),
-      executionOptIn: true, interactiveConfirmation: true,
+      executionOptIn: true, interactiveConfirmation: true, guestBootWaitMs: 0,
       readinessProbe: async () => ({
         featureReady: true, platform: "win32", session: "interactive",
         cliPresent: true, executable: "C:\\Windows\\System32\\wsb.exe"
@@ -129,7 +130,7 @@ async function withSimulatedVM(run) {
       reportReader: async () => record,
       vmCommand: async (exe, argv) => {
         calls.push(argv[0]);
-        return { stdout: "", stderr: "" };
+        return { stdout: argv[0] === "exec" ? '{"ExitCode":0}' : argv[0] === "list" ? LIST_JSON : "", stderr: "" };
       }
     };
     await run({ journal, staged, args, calls });
@@ -140,7 +141,7 @@ test("VM controller reserves and releases persistent ownership after successful 
   await withSimulatedVM(async ({ args, journal, calls }) => {
     const result = await runWindowsVmJob(args);
     assert.equal(result.sandboxStopped, true);
-    assert.deepEqual(calls, ["start", "stop"]);
+    assert.deepEqual(calls, ["start", "exec", "stop", "list"]);
     assert.equal((await journal.inspect()).active, false);
   });
 });
@@ -152,12 +153,13 @@ test("stop failure leaves durable VM identifier for manual recovery", async () =
       vmCommand: async (exe, argv) => {
         calls.push(argv[0]);
         if (argv[0] === "stop") throw Error("vm-stop-failed");
+        return { stdout: argv[0] === "exec" ? '{"ExitCode":0}' : argv[0] === "list" ? LIST_JSON : "" };
       }
     }), /vm-stop-not-confirmed/);
     const info = await journal.inspect();
     assert.equal(info.status, "stop-unverified");
     assert.equal(info.vmId, VM_ID);
-    assert.deepEqual(calls, ["start", "stop"]);
+    assert.deepEqual(calls, ["start", "exec", "stop"]);
     await assert.rejects(claim(journal), /vm-ownership-locked-requires-review/);
   });
 });
@@ -172,7 +174,7 @@ test("cancelled VM run still stops and releases journal when stop succeeds", asy
         abort.signal.throwIfAborted();
       }
     }), /cancelled-for-test/);
-    assert.deepEqual(calls, ["start", "stop"]);
+    assert.deepEqual(calls, ["start", "exec", "stop", "list"]);
     assert.equal((await journal.inspect()).active, false);
   });
 });

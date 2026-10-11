@@ -46,7 +46,7 @@ test("Windows Sandbox configuration has read-only inputs, one writable result ch
   assert.match(profile, /<ProtectedClient>Enable<\/ProtectedClient>/);
   assert.match(profile, /<ReadOnly>true<\/ReadOnly>/);
   assert.match(profile, /<ReadOnly>false<\/ReadOnly>/);
-  assert.match(profile, /guest-runner\.ps1/);
+  assert.doesNotMatch(profile, /<LogonCommand>/);
   assert.throws(() => createOfflineRunnerProfile({ inputHostFolder: "C:\\Jobs\\folder", outputHostFolder: "C:\\Jobs\\folder\\output" }), /overlap/);
   assert.throws(() => createOfflineRunnerProfile({ inputHostFolder: "\\\\server\\share", outputHostFolder: output }), /unsafe/);
   assert.throws(() => createOfflineRunnerProfile({ inputHostFolder: "D:\\unsafe&whoami", outputHostFolder: output }), /unsafe/);
