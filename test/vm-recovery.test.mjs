@@ -196,6 +196,22 @@ test("concurrent manual recovery cannot both succeed", async()=>{
   });
 });
 
+test("interrupted manual recovery guard prevents reinspection and new VM claims", async()=>{
+  await withRecord("stop-unverified",async({journal})=>{
+    const guard=path.join(journal.lock,".manual-recovery-in-progress");
+    await fs.mkdir(guard);
+    const status=await inspectVmRecovery({journal,...baseProbes});
+    assert.equal(status.active,true);
+    assert.equal(status.eligible,false);
+    assert.equal(status.reason,"invalid-owner-record");
+    assert.equal((await journal.inspect()).status,"indeterminate");
+    await assert.rejects(journal.claim({
+      vmId:VM_ID,jobId:JOB_ID,manifestHash:HASH,ownerSid:SID
+    }),/vm-ownership-locked-requires-review/);
+    assert.equal((await journal.read()).phase,"stop-unverified");
+  });
+});
+
 test("manual recovery CLI is separate from web and enforces terminal consent", async()=>{
   const script=await fs.readFile(new URL("../scripts/manual-vm-recovery.mjs",import.meta.url),"utf8");
   const server=await fs.readFile(new URL("../src/server.mjs",import.meta.url),"utf8");

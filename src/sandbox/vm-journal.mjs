@@ -91,6 +91,12 @@ export class VmOwnershipJournal {
     try {
       const record = await this.read();
       if (!record) return { active: false, status: "none" };
+      // A recovery guard, partial transition temp, or unknown file means the
+      // journal must not be advertised as an ordinary recoverable record.
+      const entries = await fs.readdir(this.lock);
+      if (entries.length !== 1 || entries[0] !== "owner.json") {
+        throw Error("vm-owner-lock-has-unexpected-content");
+      }
       return { active: true, status: record.phase, vmId: record.vmId,
         jobId: record.jobId, updatedAt: record.updatedAt,
         requiresManualReview: true };
@@ -149,28 +155,58 @@ export class VmOwnershipJournal {
     if (!UUID.test(vmId) || !HASH.test(expectedFingerprint)) {
       throw Error("invalid-vm-recovery-identity");
     }
+    const before = await this.read();
+    if (!before || before.vmId !== vmId ||
+        vmOwnershipFingerprint(before) !== expectedFingerprint) {
+      throw Error("vm-owner-record-changed-during-recovery");
+    }
+
+    // An atomic NTFS directory claim serializes manual recoveries. A crash
+    // leaves a conservative, inspect-blocking marker instead of allowing a
+    // second operator to silently race or retry a partially released journal.
+    const recoveryGuard = path.join(this.lock, ".manual-recovery-in-progress");
+    await fs.mkdir(recoveryGuard);
     const current = await this.read();
     if (!current || current.vmId !== vmId ||
         vmOwnershipFingerprint(current) !== expectedFingerprint) {
       throw Error("vm-owner-record-changed-during-recovery");
     }
     const entries = await fs.readdir(this.lock);
-    if (entries.length !== 1 || entries[0] !== "owner.json") {
+    if (entries.length !== 2 || !entries.includes("owner.json") ||
+        !entries.includes(".manual-recovery-in-progress")) {
       throw Error("vm-owner-lock-has-unexpected-content");
     }
+
+    let finalExpected = current;
     if (current.phase !== "stopped") {
-      const next = { ...current, phase: "stopped",
+      finalExpected = { ...current, phase: "stopped",
         updatedAt: new Date().toISOString(),
         manuallyRecoveredAt: new Date().toISOString() };
       const temporary = path.join(this.lock, ".owner-" + randomUUID() + ".tmp");
       try {
-        await fs.writeFile(temporary, JSON.stringify(next, null, 2), { flag: "wx" });
+        await fs.writeFile(temporary, JSON.stringify(finalExpected, null, 2), { flag: "wx" });
         await fs.rename(temporary, this.record);
       } finally {
         await fs.rm(temporary, { force: true }).catch(() => {});
       }
     }
-    return this.releaseStopped(vmId);
+    const final = await this.read();
+    if (!final || final.vmId !== vmId || final.phase !== "stopped" ||
+        vmOwnershipFingerprint(final) !== vmOwnershipFingerprint(finalExpected)) {
+      throw Error("vm-owner-record-changed-during-recovery");
+    }
+    const finalEntries = await fs.readdir(this.lock);
+    if (finalEntries.length !== 2 || !finalEntries.includes("owner.json") ||
+        !finalEntries.includes(".manual-recovery-in-progress")) {
+      throw Error("vm-owner-lock-has-unexpected-content");
+    }
+
+    // A failed unlink/rmdir retains the parent .vm-active directory, so new
+    // claims remain blocked and require manual investigation.
+    await fs.unlink(this.record);
+    await fs.rmdir(recoveryGuard);
+    await fs.rmdir(this.lock);
+    return { released: true, vmId };
   }
 
   async releaseStopped(vmId) {

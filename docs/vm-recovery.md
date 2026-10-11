@@ -48,8 +48,11 @@ or attached to a still-running PID, it reports blocked rather than recoverable.
    Any active WSB session, changed owner content, SID mismatch, unknown PID
    liveness or list error prevents release.
 8. Only the exact matching owner record is transitioned to stopped and released.
-   If any filesystem operation fails, the journal stays in a fail-closed state
-   and must be manually investigated; no force-unlock flag exists.
+   Manual release takes an atomic one-operator directory guard inside the owner
+   lock and revalidates the record before unlinking it. Competing releases fail;
+   an interrupted release retains the parent lock or recovery guard and requires
+   separate administrator-guided investigation. There is no force-unlock flag.
+   If a filesystem operation fails, do not delete the partial lock by hand.
 
 ## Identity binding
 
