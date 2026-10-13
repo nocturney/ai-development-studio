@@ -106,6 +106,10 @@ export class HostVmJournal {
   }
 
   async read(allowReleaseGuard = false) {
+    // Recheck the ENTIRE root ancestry before each mutation/read. A root swap
+    // after a valid initial claim must not redirect transitions or release.
+    // This still needs a native Windows handle/broker to eliminate TOCTOU.
+    await assertExistingNoLinks(this.root);
     const exists = await fs.lstat(this.lock).catch(error => {
       if (error.code === "ENOENT") return null;
       throw error;
