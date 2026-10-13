@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import { VmOwnershipJournal } from "../src/sandbox/vm-journal.mjs";
+import { HostVmJournal } from "../src/sandbox/vm-host-coordinator.mjs";
+import { DualVmOwnershipJournal } from "../src/sandbox/vm-dual-journal.mjs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -19,6 +21,15 @@ async function withPrepared(run) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "studio-vm-controller-"));
   const outputDir = path.join(root, "output");
   await fs.mkdir(outputDir);
+  const globalRoot=path.join(root,"trusted-host-owner");
+  await fs.mkdir(globalRoot);
+  const journal=new DualVmOwnershipJournal({
+    jobRoot:path.join(root,"jobs"),
+    hostJournal:new HostVmJournal({
+      root:globalRoot,attestRoot:async()=>({verified:true})
+    }),
+    verifyStopped:async({vmId,ownerSid})=>({vmId,ownerSid,verifiedAbsent:true})
+  });
   const configPath = path.join(root, "job.wsb");
   await fs.writeFile(configPath, "<Configuration><Networking>Disable</Networking></Configuration>");
   const staged = {
@@ -37,7 +48,7 @@ async function withPrepared(run) {
     status: "passed", exitCode: 0, elapsedMs: 150, stdout: "tests passed", stderr: ""
   });
   const args = {
-    staged, journal: new VmOwnershipJournal(path.join(root, "jobs")),
+    staged, journal,
     approval: expectedVmApproval(staged), executionOptIn: true,
     interactiveConfirmation: true, vmId: VM_ID, startupGraceMs: 1000, guestBootWaitMs: 0,
     readinessProbe: async () => ({
@@ -279,6 +290,15 @@ test("any VM execution entrypoint must supply a durable ownership journal", asyn
     await assert.rejects(runWindowsVmJob({ ...args, journal: null }),
       /vm-ownership-journal-required/);
     assert.equal(calls.length, 0);
+  });
+});
+
+test("a legacy per-job journal alone cannot reach WSB start, even with opt-in",async()=>{
+  await withPrepared(async({args,calls})=>{
+    const legacy=new VmOwnershipJournal(path.join(path.dirname(args.staged.configPath),"legacy-jobs"));
+    await assert.rejects(runWindowsVmJob({...args,journal:legacy}),/host-wide-vm-ownership-required/);
+    assert.deepEqual(calls,[]);
+    assert.equal((await legacy.inspect()).active,false);
   });
 });
 
