@@ -88,6 +88,16 @@ export class DualVmOwnershipJournal extends VmOwnershipJournal {
     return afterLocal;
   }
 
+  /**
+   * NEVER inherit VmOwnershipJournal's local-only manual recovery unlink.
+   * The dual owner is a separate machine-wide authority: clearing merely the
+   * per-job record could leave a live VM or break the consent fingerprint.
+   * Only a separately reviewed trusted broker may ever release BOTH records.
+   */
+  async releaseAfterManualRecovery() {
+    denied("dual-recovery-broker-not-admitted");
+  }
+
   async releaseStopped(vmId) {
     const local=await super.read(),global=await this.hostJournal.read();
     if (!recordsMatch(local,global,this.root) || local.vmId !== vmId ||
