@@ -25,6 +25,15 @@ const inspected = await inspectVmRecovery({ journal });
 console.log(JSON.stringify(inspected, null, 2));
 
 if (mode === "--inspect") process.exit(0);
+
+// Draft #17: legacy per-job recovery cannot safely clear a new host-wide
+// owner record, even after two empty VM lists. A trusted dual-record recovery
+// transaction, separately attested Windows SID and operator approval are not
+// yet wired. Do not let local-only recovery silently appear successful.
+console.error("Dual ownership recovery not yet authorized: inspect both " +
+  "machine and job records; never remove only the per-job lock.");
+process.exit(2);
+
 if (!inspected.eligible) {
   console.error("Recovery is blocked. Investigate the recorded VM and controller state manually.");
   process.exit(2);
