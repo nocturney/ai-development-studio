@@ -170,7 +170,9 @@ test("stop failure leaves durable VM identifier for manual recovery", async () =
     assert.equal(info.status, "stop-unverified");
     assert.equal(info.vmId, VM_ID);
     assert.deepEqual(calls, ["start", "exec", "stop"]);
-    await assert.rejects(claim(journal), /vm-ownership-locked-requires-review/);
+    await assert.rejects(journal.claim({
+      vmId:VM_ID,jobId:JOB_ID,manifestHash:HASH,ownerSid:SID
+    }), /occupied-requires-manual-review/);
   });
 });
 
