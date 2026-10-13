@@ -60,7 +60,22 @@ async function assertExistingNoLinks(root) {
     if (parent === current) break;
     current = parent;
   }
-  if (path.resolve(await fs.realpath(root)) !== root) reject("root-reparse");
+  const canonical = path.resolve(await fs.realpath(root));
+  if (process.platform === "win32") {
+    // Native Win32 realpath may recase C:\\Windows\\TEMP to C:\\Windows\\Temp.
+    // Requiring byte-identical case incorrectly blocks legitimate NTFS roots.
+    // Retain two independent safeguards: exact case-folded canonical path
+    // AND same native file identity. A same-name/different-inode object on a
+    // case-sensitive NTFS directory or any junction still fails closed.
+    if (canonical.toLowerCase() !== root.toLowerCase()) reject("root-reparse");
+    const [requested, resolved] = await Promise.all([
+      fs.lstat(root, {bigint:true}), fs.lstat(canonical, {bigint:true})
+    ]);
+    if (!requested.isDirectory() || !resolved.isDirectory() ||
+        requested.isSymbolicLink() || resolved.isSymbolicLink() ||
+        requested.dev !== resolved.dev || requested.ino !== resolved.ino)
+      reject("root-reparse");
+  } else if (canonical !== root) reject("root-reparse");
 }
 
 /**
