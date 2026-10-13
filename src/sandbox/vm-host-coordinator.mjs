@@ -14,6 +14,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA256 = /^[a-f0-9]{64}$/;
 const SID = /^S-1-\d+(?:-\d+){2,15}$/i;
 const PHASES = new Set(["reserved","launch-requested","running","stopping","stopped","stop-unverified"]);
+// One originating PID is permitted to advance the durable owner, but that
+// PID may have multiple HostVmJournal objects. Serialize those transitions
+// across instances to prevent leftover .owner-*.tmp files on overlapping calls.
+// This is LAB-level concurrency protection, NOT a native Windows lock broker.
+const IN_FLIGHT_HOST_TRANSITIONS = new Set();
+const hostTransitionKey = root => process.platform === "win32" ? root.toLowerCase() : root;
 const TRANSITIONS = Object.freeze({
   reserved: ["launch-requested","stopped"],
   "launch-requested": ["running","stopping","stopped","stop-unverified"],
@@ -152,19 +158,28 @@ export class HostVmJournal {
 
   async transition(vmId, phase, ownerSid) {
     if (!UUID.test(vmId) || !SID.test(ownerSid) || !PHASES.has(phase)) reject("invalid-transition-request");
-    const current = await this.read();
-    // Only the originating process may advance its live host-wide record.
-    // Same Windows account SID is not sufficient after a controller crash.
-    if (!current || current.vmId !== vmId || current.ownerSid !== ownerSid ||
-        current.pid !== process.pid || !TRANSITIONS[current.phase].includes(phase))
-      reject("invalid-transition");
-    const next = {...current,phase,updatedAt:new Date().toISOString()};
-    const temp = path.join(this.lock,".owner-"+randomUUID()+".tmp");
-    // If a partial transition crashes or rename fails, the unknown extra file
-    // intentionally blocks future claims/release pending explicit inspection.
-    await fs.writeFile(temp,JSON.stringify(next,null,2),{flag:"wx"});
-    await fs.rename(temp,this.recordPath);
-    return next;
+    const key = hostTransitionKey(this.root);
+    // This guard must be taken SYNCHRONOUSLY, before the first await. It covers
+    // separate journal objects referencing the same root in the same PID.
+    if (IN_FLIGHT_HOST_TRANSITIONS.has(key)) reject("transition-in-progress");
+    IN_FLIGHT_HOST_TRANSITIONS.add(key);
+    try {
+      const current = await this.read();
+      // Only the originating process may advance its live host-wide record.
+      // Same Windows account SID is not sufficient after a controller crash.
+      if (!current || current.vmId !== vmId || current.ownerSid !== ownerSid ||
+          current.pid !== process.pid || !TRANSITIONS[current.phase].includes(phase))
+        reject("invalid-transition");
+      const next = {...current,phase,updatedAt:new Date().toISOString()};
+      const temp = path.join(this.lock,".owner-"+randomUUID()+".tmp");
+      // If a partial transition crashes or rename fails, the unknown extra file
+      // intentionally blocks future claims/release pending explicit inspection.
+      await fs.writeFile(temp,JSON.stringify(next,null,2),{flag:"wx"});
+      await fs.rename(temp,this.recordPath);
+      return next;
+    } finally {
+      IN_FLIGHT_HOST_TRANSITIONS.delete(key);
+    }
   }
 
   async releaseAfterVerifiedStop({vmId,ownerSid,jobJournal,verifyStopped}) {
@@ -184,7 +199,11 @@ export class HostVmJournal {
 
     // Serialize simultaneous release attempts; interrupted release holds lock.
     const guard = path.join(this.lock,".release-guard");
-    await fs.mkdir(guard);
+    try { await fs.mkdir(guard); }
+    catch (error) {
+      if (error?.code === "EEXIST") reject("release-in-progress");
+      throw error;
+    }
     const fresh = await this.read(true);
     if (fingerprint(fresh) !== fingerprint(old)) reject("owner-changed");
     const localAgain = await jobJournal.inspect();
