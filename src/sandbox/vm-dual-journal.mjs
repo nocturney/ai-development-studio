@@ -101,8 +101,11 @@ export class DualVmOwnershipJournal extends VmOwnershipJournal {
     await super.releaseStopped(vmId);
     // If second proof or release fails, host lock is retained. It must not be
     // automatically retried/reconciled by the regular runner.
+    // HostVmJournal must inspect only the per-job journal at this point:
+    // Dual.inspect() intentionally reports a held global lock as active.
+    const localOnly={root:this.root,inspect:()=>super.inspect()};
     return this.hostJournal.releaseAfterVerifiedStop({
-      vmId,ownerSid:local.ownerSid,jobJournal:this,
+      vmId,ownerSid:local.ownerSid,jobJournal:localOnly,
       verifyStopped:this.verifyStopped
     });
   }
