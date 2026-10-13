@@ -134,8 +134,11 @@ export class HostVmJournal {
   async transition(vmId, phase, ownerSid) {
     if (!UUID.test(vmId) || !SID.test(ownerSid) || !PHASES.has(phase)) reject("invalid-transition-request");
     const current = await this.read();
+    // Only the originating process may advance its live host-wide record.
+    // Same Windows account SID is not sufficient after a controller crash.
     if (!current || current.vmId !== vmId || current.ownerSid !== ownerSid ||
-        !TRANSITIONS[current.phase].includes(phase)) reject("invalid-transition");
+        current.pid !== process.pid || !TRANSITIONS[current.phase].includes(phase))
+      reject("invalid-transition");
     const next = {...current,phase,updatedAt:new Date().toISOString()};
     const temp = path.join(this.lock,".owner-"+randomUUID()+".tmp");
     // If a partial transition crashes or rename fails, the unknown extra file
