@@ -10,6 +10,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { probeWindowsVm, parseSandboxListResponse } from "./vm-controller.mjs";
 import { VmOwnershipJournal, vmOwnershipFingerprint } from "./vm-journal.mjs";
+import { DualVmOwnershipJournal } from "./vm-dual-journal.mjs";
 
 const execFileAsync = promisify(execFile);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -65,6 +66,15 @@ export async function inspectVmRecovery({
 }) {
   if (!(journal instanceof VmOwnershipJournal)) throw Error("vm-recovery-journal-required");
   const initial = await journal.inspect();
+  if (journal instanceof DualVmOwnershipJournal) {
+    // An older per-job-only inspector may otherwise pronounce an orphan
+    // eligible, while machine-global owner still holds an active reservation.
+    // Until a separately attested TWO-RECORD recovery exists, do not even
+    // mint an operator approval phrase from this entry point.
+    return {schema:VM_RECOVERY_SCHEMA,active:initial.active !== false,
+      eligible:false,reason:"dual-owner-recovery-broker-required",
+      requiresManualReview:true};
+  }
   if (!initial.active) {
     return { schema: VM_RECOVERY_SCHEMA, active: false, eligible: false,
       reason: "no-active-ownership" };
@@ -134,6 +144,8 @@ export async function recoverStoppedVmOwnership({
     new Promise(resolve => setTimeout(resolve, ms))
 }) {
   if (!(journal instanceof VmOwnershipJournal)) throw Error("vm-recovery-journal-required");
+  if (journal instanceof DualVmOwnershipJournal)
+    throw Error("dual-owner-recovery-broker-required");
   if (!optIn || !interactiveConfirmation || !inspected?.eligible ||
       approval !== expectedVmRecoveryApproval(inspected)) {
     throw Error("explicit-vm-recovery-approval-required");
