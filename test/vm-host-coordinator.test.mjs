@@ -69,6 +69,24 @@ test("two simultaneous callers from different job roots get one host-wide owner"
   await assert.rejects(first.claim(two),/occupied-requires-manual-review/);
  });
 });
+test("same PID, separate HostVmJournal objects cannot race a phase and orphan temp records",async()=>{
+  await fixture(async({first,second,one})=>{
+    await first.claim(one);
+    const outcomes=await Promise.allSettled([
+      first.transition(ID1,"launch-requested",SID),
+      second.transition(ID1,"launch-requested",SID)
+    ]);
+    assert.equal(outcomes.filter(x=>x.status==="fulfilled").length,1);
+    const blocked=outcomes.filter(x=>x.status==="rejected");
+    assert.equal(blocked.length,1);
+    assert.match(String(blocked[0].reason),/host-vm:transition-in-progress/);
+    assert.equal((await first.read()).phase,"launch-requested");
+    assert.deepEqual(await fs.readdir(first.lock),["owner.json"]);
+    await second.transition(ID1,"running",SID);
+    assert.equal((await first.inspect()).status,"running");
+  });
+});
+
 test("no second owner after interrupted mkdir-before-record crash",async()=>{
  await fixture(async({first,shared,two})=>{
   await fs.mkdir(path.join(shared,".vm-host-active"));
