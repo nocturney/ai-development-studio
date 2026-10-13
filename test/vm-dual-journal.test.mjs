@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import {HostVmJournal} from "../src/sandbox/vm-host-coordinator.mjs";
 import {DualVmOwnershipJournal} from "../src/sandbox/vm-dual-journal.mjs";
+import {vmOwnershipFingerprint} from "../src/sandbox/vm-journal.mjs";
+import {inspectVmRecovery,recoverStoppedVmOwnership,expectedVmRecoveryApproval} from "../src/sandbox/vm-recovery.mjs";
 
 const SID="S-1-5-21-101-202-303-1001";
 const VM1="2697ebf0-6750-4ae6-bb6e-784110dbb275";
@@ -152,5 +154,39 @@ test("host-root symlink swap after claim blocks all subsequent state changes",as
   await fs.rename(archive,machine);
   assert.equal((await journalA.inspect()).status,"reserved");
   assert.equal((await journalA.hostJournal.read()).vmId,VM1);
+ });
+});
+
+test("every programmatic manual-recovery route refuses clearing only local dual ownership",async()=>{
+ await rig(async({journalA,journalB})=>{
+  await journalA.claim(one);
+  await journalA.transition(VM1,"launch-requested");
+  const originalLocal=await journalA.read();
+  const originalGlobal=await journalA.hostJournal.read();
+  let readinessCalls=0,listCalls=0;
+  const report=await inspectVmRecovery({
+    journal:journalA,
+    readinessProbe:async()=>{readinessCalls++;throw Error("unreachable");},
+    listVmIds:async()=>{listCalls++;throw Error("unreachable");}
+  });
+  assert.equal(report.active,true);
+  assert.equal(report.eligible,false);
+  assert.equal(report.reason,"dual-owner-recovery-broker-required");
+  assert.throws(()=>expectedVmRecoveryApproval(report),
+    /vm-recovery-not-approved-for-inspection/);
+  await assert.rejects(journalA.releaseAfterManualRecovery({
+    vmId:VM1,expectedFingerprint:vmOwnershipFingerprint(originalLocal)
+  }),/dual-vm:dual-recovery-broker-not-admitted/);
+  await assert.rejects(recoverStoppedVmOwnership({
+    journal:journalA,approval:"forged-operator-consent",inspected:report,
+    optIn:true,interactiveConfirmation:true,
+    readinessProbe:async()=>{readinessCalls++;throw Error("unreachable");},
+    listVmIds:async()=>{listCalls++;throw Error("unreachable");}
+  }),/dual-owner-recovery-broker-required/);
+  assert.equal(readinessCalls,0);
+  assert.equal(listCalls,0);
+  assert.deepEqual(await journalA.read(),originalLocal);
+  assert.deepEqual(await journalA.hostJournal.read(),originalGlobal);
+  await assert.rejects(journalB.claim(two),/occupied-requires-manual-review/);
  });
 });
