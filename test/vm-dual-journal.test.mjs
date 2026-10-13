@@ -137,3 +137,20 @@ test("mismatched local record identity cannot advance global state",async()=>{
   assert.equal((await journalA.hostJournal.read()).phase,"reserved");
  });
 });
+
+test("host-root symlink swap after claim blocks all subsequent state changes",async()=>{
+ await rig(async({journalA,machine,root})=>{
+  await journalA.claim(one);
+  const archive=path.join(root,"real-host-moved");
+  await fs.rename(machine,archive);
+  await fs.symlink(archive,machine,"dir");
+  await assert.rejects(journalA.transition(VM1,"launch-requested"),
+    /host-vm:unsafe-root-or-ancestor/);
+  assert.equal((await journalA.inspect()).status,"indeterminate");
+  await assert.rejects(journalA.releaseStopped(VM1));
+  await fs.unlink(machine);
+  await fs.rename(archive,machine);
+  assert.equal((await journalA.inspect()).status,"reserved");
+  assert.equal((await journalA.hostJournal.read()).vmId,VM1);
+ });
+});
