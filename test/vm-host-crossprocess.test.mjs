@@ -8,7 +8,7 @@ import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {HostVmJournal} from "../src/sandbox/vm-host-coordinator.mjs";
 
-const WORKER=fileURLToPath(new URL("./fixtures/vm-host-child-worker.mjs",import.meta.url));
+const WORKER=fileURLToPath(new URL("../qa-fixtures/vm-host-child-worker.mjs",import.meta.url));
 const ID1="b9a45738-70d9-448e-b20e-a50c828c551f";
 const ID2="e2f62dcf-27c8-433b-9dc1-a60e5c357050";
 const JOB1="1544cb72-81f0-43ba-9531-44446dcc7a8a";
