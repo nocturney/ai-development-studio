@@ -11,6 +11,7 @@ import { probeWindowsVm, expectedVmApproval, runWindowsVmJob, manualVmExitStatus
 import { stageOfflineRunnerJob } from "../src/sandbox/offline-runner.mjs";
 import { diagnoseSandbox } from "../src/sandbox/windows.mjs";
 import { VmOwnershipJournal } from "../src/sandbox/vm-journal.mjs";
+import { createCanonicalWindowsHostJournal } from "../src/sandbox/vm-host-coordinator.mjs";
 
 const args = process.argv.slice(2);
 if (args.length > 1 || (args.length && !["--status", "--run-demo"].includes(args[0]))) {
@@ -23,8 +24,11 @@ const root = path.resolve(process.env.STUDIO_RUNNER_JOBS_ROOT ??
     path.join(process.env.LOCALAPPDATA, "AIStudio", "SandboxJobs") :
     path.join(process.cwd(), ".pilot-workspace", "offline-runner-packages")));
 const journal = new VmOwnershipJournal(root);
-const [host, feature, priorOwnership] = await Promise.all([
-  probeWindowsVm(), diagnoseSandbox(), journal.inspect()
+const [host, feature, priorOwnership, hostOwnership] = await Promise.all([
+  probeWindowsVm(), diagnoseSandbox(), journal.inspect(),
+  process.platform === "win32"
+    ? createCanonicalWindowsHostJournal().inspect()
+    : Promise.resolve({active:true,status:"windows-only"})
 ]);
 console.log(JSON.stringify({
   schema: host.schema,
@@ -36,9 +40,18 @@ console.log(JSON.stringify({
   executionEnabled: false,
   reason: host.reason,
   vmOwnership: priorOwnership,
-  note: "Read-only diagnostic. No VM has been launched."
+  hostOwnership,
+  trustedHostBrokerReady: false,
+  note: "Read-only. Native Windows root ACLs are NOT proof of an authorized host broker."
 }, null, 2));
 if (mode === "--status") process.exit(0);
+
+// Draft #17 cannot grant an independent machine-owned writer with the
+// current process account. Stop BEFORE staging or asking for VM approval;
+// this remains blocked even when a caller sets STUDIO_ALLOW_VM_EXECUTION=1.
+console.error("VM launch refused: independent host-wide owner broker/SID attestor " +
+  "and dual-journal recovery have not passed release gates.");
+process.exit(2);
 
 if (priorOwnership.active) {
   console.error("A previous VM ownership record requires manual review before any new run.");
