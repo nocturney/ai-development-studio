@@ -49,3 +49,18 @@ test("manual --status reports global coordination separately but never enables e
   assert.deepEqual(await fs.readdir(root),[]);
  });
 });
+
+test("manual --inspect never advertises false dual-owner release eligibility",async()=>{
+ await fixture(async root=>{
+  const r=invoke(recovery,"--inspect",root);
+  assert.equal(r.status,0,r.stderr);
+  const inspection=JSON.parse(r.stdout);
+  assert.equal(inspection.eligible,false);
+  assert.equal(inspection.dualReleaseAllowed,false);
+  assert.equal(inspection.mutationAttempted,false);
+  assert.equal(inspection.reason,"dual-owner-recovery-broker-required");
+  assert.ok(inspection.hostOwnership&&typeof inspection.hostOwnership.status==="string");
+  assert.ok(inspection.vmOwnership&&typeof inspection.vmOwnership.status==="string");
+  assert.deepEqual(await fs.readdir(root),[]);
+ });
+});
