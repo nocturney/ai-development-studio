@@ -212,12 +212,14 @@ test("interrupted manual recovery guard prevents reinspection and new VM claims"
   });
 });
 
-test("manual recovery CLI is separate from web and enforces terminal consent", async()=>{
+test("manual recovery CLI is separate from web and denies the legacy per-job-only release", async()=>{
   const script=await fs.readFile(new URL("../scripts/manual-vm-recovery.mjs",import.meta.url),"utf8");
   const server=await fs.readFile(new URL("../src/server.mjs",import.meta.url),"utf8");
-  assert.match(script,/STUDIO_ALLOW_VM_RECOVERY/);
-  assert.match(script,/process\.stdin\.isTTY/);
-  assert.match(script,/expectedVmRecoveryApproval/);
+  assert.match(script,/createCanonicalWindowsHostJournal/);
+  assert.match(script,/dualReleaseAllowed:false/);
+  assert.match(script,/dual-owner-recovery-broker-required/);
+  assert.match(script,/mutationAttempted:false/);
+  assert.doesNotMatch(script,/\bawait recoverStoppedVmOwnership\(/);
   assert.doesNotMatch(server,/recoverStoppedVmOwnership/);
 });
 

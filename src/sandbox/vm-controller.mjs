@@ -14,6 +14,7 @@ import { performance } from "node:perf_hooks";
 import { diagnoseSandbox } from "./windows.mjs";
 import { parseUntrustedRunnerResult, verifyPreparedOfflineRunnerJob } from "./offline-runner.mjs";
 import { VmOwnershipJournal } from "./vm-journal.mjs";
+import { DualVmOwnershipJournal } from "./vm-dual-journal.mjs";
 
 const execFileAsync = promisify(execFile);
 const VM_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -239,6 +240,14 @@ export async function runWindowsVmJob({
   }
   if (!(journal instanceof VmOwnershipJournal)) {
     throw Error("vm-ownership-journal-required");
+  }
+  // Draft P0: disallow the old single job-root owner for ANY VM invocation.
+  // This is deliberately breaking/fail-closed until a separately reviewed
+  // machine-owned NTFS broker and independently verified WSB proof exist.
+  // Mocked controllers must also provide the dual owner, so tests cannot
+  // accidentally exercise an unsafe bypass.
+  if (!(journal instanceof DualVmOwnershipJournal)) {
+    throw Error("host-wide-vm-ownership-required");
   }
   if (!VM_ID_RE.test(vmId) ||
       !Number.isInteger(pollMs) || pollMs < 100 || pollMs > 10000 ||

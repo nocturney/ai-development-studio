@@ -4,6 +4,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { VmOwnershipJournal } from "../src/sandbox/vm-journal.mjs";
+import { HostVmJournal } from "../src/sandbox/vm-host-coordinator.mjs";
+import { DualVmOwnershipJournal } from "../src/sandbox/vm-dual-journal.mjs";
 import { runWindowsVmJob, expectedVmApproval } from "../src/sandbox/vm-controller.mjs";
 
 const JOB_ID = "24a8e2b5-6c01-49d0-b0c9-144cf924113f";
@@ -103,7 +105,14 @@ test("parallel journal acquisition permits exactly one controller", async () => 
 });
 
 async function withSimulatedVM(run) {
-  await fixture(async ({ root, journal }) => {
+  await fixture(async ({ root }) => {
+    const machine=path.join(root,"trusted-global-owner");
+    await fs.mkdir(machine);
+    const journal=new DualVmOwnershipJournal({
+      jobRoot:path.join(root,"jobs"),
+      hostJournal:new HostVmJournal({root:machine,attestRoot:async()=>({verified:true})}),
+      verifyStopped:async({vmId,ownerSid})=>({vmId,ownerSid,verifiedAbsent:true})
+    });
     const outputDir = path.join(root, "output");
     await fs.mkdir(outputDir);
     const configPath = path.join(root, "job.wsb");
@@ -161,7 +170,9 @@ test("stop failure leaves durable VM identifier for manual recovery", async () =
     assert.equal(info.status, "stop-unverified");
     assert.equal(info.vmId, VM_ID);
     assert.deepEqual(calls, ["start", "exec", "stop"]);
-    await assert.rejects(claim(journal), /vm-ownership-locked-requires-review/);
+    await assert.rejects(journal.claim({
+      vmId:VM_ID,jobId:JOB_ID,manifestHash:HASH,ownerSid:SID
+    }), /occupied-requires-manual-review/);
   });
 });
 
@@ -182,8 +193,8 @@ test("cancelled VM run still stops and releases journal when stop succeeds", asy
 
 test("failed journal claim prevents any Sandbox command", async () => {
   await withSimulatedVM(async ({ args, journal, calls }) => {
-    await claim(journal);
-    await assert.rejects(runWindowsVmJob(args), /vm-ownership-locked-requires-review/);
+    await journal.claim({vmId:VM_ID,jobId:JOB_ID,manifestHash:HASH,ownerSid:SID});
+    await assert.rejects(runWindowsVmJob(args), /occupied-requires-manual-review/);
     assert.equal(calls.length, 0);
   });
 });

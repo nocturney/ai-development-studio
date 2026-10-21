@@ -82,8 +82,23 @@ even if progress callbacks fail, test results are malformed, or the operator can
 - The web UI has no VM launch, recovery or unlock API endpoints. Runtime
   Cloud providers remain disabled; this does not affect Office 2.0.
 
+## Native host-root readiness (read-only)
+
+    npm run runner:vm-host-readiness
+
+runs a fixed PowerShell probe of C:\ProgramData\AIStudio\VmOwner. It reports
+ready only for an elevated, interactive CHRIS\Chris whose protected,
+SYSTEM-owned root grants FullControl to SYSTEM and Administrators, with no
+other writer, deny ACE, reparse point or absent root. It never writes, changes
+ACLs or starts Windows Sandbox, and it does not enable VM launch: the manual
+runner still refuses. Logic tests run on macOS; the native probe itself is
+unverified until run on the Windows host.
+
 ## Source
 
+src/sandbox/vm-host-readiness.mjs
+scripts/manual-vm-host-readiness.mjs
+test/vm-host-readiness.test.mjs
 src/sandbox/vm-journal.mjs
 src/sandbox/vm-controller.mjs
 scripts/manual-vm-runner.mjs

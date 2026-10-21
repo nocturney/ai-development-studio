@@ -11,6 +11,7 @@
     "runner:prepare": "node scripts/manual-prepare-runner.mjs",
     "runner:vm-readiness": "node scripts/manual-vm-runner.mjs --status",
     "runner:vm-recovery": "node scripts/manual-vm-recovery.mjs",
+    "runner:vm-host-readiness": "node scripts/manual-vm-host-readiness.mjs",
     "runner:vm-demo": "node scripts/manual-vm-runner.mjs --run-demo",
     "providers": "node src/cli.mjs providers",
     "test": "node --test && node scripts/check-ui.mjs && node --check src/server.mjs"
