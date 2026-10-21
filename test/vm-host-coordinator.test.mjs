@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import {HostVmJournal, WINDOWS_VM_HOST_ROOT} from "../src/sandbox/vm-host-coordinator.mjs";
+import {HostVmJournal, WINDOWS_VM_HOST_ROOT, rootsOverlap} from "../src/sandbox/vm-host-coordinator.mjs";
 
 const ID1="75ac3cb5-68aa-449c-952e-71f6bcb57c18";
 const ID2="c76d27a5-bac9-4687-a7e6-76e61bd1db0c";
@@ -171,4 +171,18 @@ test("job roots are not allowed to overlap with host root",async()=>{
   await assert.rejects(first.claim({...one,jobJournalRoot:shared}),/invalid-identity-or-root/);
   await assert.rejects(first.claim({...one,jobJournalRoot:path.join(shared,"jobs")}),/invalid-identity-or-root/);
  });
+});
+test("win32 overlap check folds case and separators but keeps siblings",()=>{
+ const w=path.win32, host="C:\\ProgramData\\VMHost";
+ for(const job of ["C:\\ProgramData\\VMHost","c:\\programdata\\vmhost","C:/ProgramData/VMHost/jobs",
+   "c:\\ProgramData\\vmhost\\Jobs\\x","C:\\ProgramData\\VMHost\\","C:\\ProgramData"]) assert.ok(rootsOverlap(host,job,w),job);
+ for(const job of ["C:\\ProgramData\\VMHost2\\jobs","D:\\ProgramData\\VMHost\\jobs","C:\\ProgramData\\Other"])
+   assert.ok(!rootsOverlap(host,job,w),job);
+});
+test("posix overlap check is case-sensitive and not prefix-based",()=>{
+ assert.ok(rootsOverlap("/var/host","/var/host/jobs"));
+ assert.ok(rootsOverlap("/var/host/jobs","/var/host"));
+ assert.ok(rootsOverlap("/var/host","/var/host"));
+ assert.ok(!rootsOverlap("/var/host","/var/Host/jobs"));
+ assert.ok(!rootsOverlap("/var/host","/var/host2"));
 });
