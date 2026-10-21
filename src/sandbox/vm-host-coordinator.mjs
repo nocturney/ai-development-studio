@@ -41,6 +41,13 @@ function safeAbsolute(root) {
     path.resolve(root) !== path.parse(root).root &&
     root.length < 230 && !root.includes("\0") && path.normalize(root) === path.resolve(root);
 }
+// Same-or-nested in either direction. Windows (NTFS) paths are compared with
+// separators normalized and case folded; POSIX paths stay case-sensitive.
+export function rootsOverlap(a, b, api = path) {
+  const fold = api.sep === "\\" ? (s) => s.toLowerCase() : (s) => s;
+  const x = fold(api.resolve(a)), y = fold(api.resolve(b));
+  return x === y || x.startsWith(y + api.sep) || y.startsWith(x + api.sep);
+}
 function validOwner(record) {
   if (!record || typeof record !== "object" || Array.isArray(record) ||
       Object.keys(record).sort().join(",") !==
@@ -134,8 +141,7 @@ export class HostVmJournal {
   async claim({vmId,jobId,manifestHash,ownerSid,jobJournalRoot}) {
     if (!UUID.test(vmId) || !UUID.test(jobId) || !SHA256.test(manifestHash) ||
         !SID.test(ownerSid) || !safeAbsolute(jobJournalRoot) ||
-        jobJournalRoot === this.root || this.root.startsWith(jobJournalRoot + path.sep) ||
-        jobJournalRoot.startsWith(this.root + path.sep)) reject("invalid-identity-or-root");
+        rootsOverlap(this.root, jobJournalRoot)) reject("invalid-identity-or-root");
     // NEVER auto-provision the canonical machine-owned root or its DACL.
     await assertExistingNoLinks(this.root);
     if (typeof this.attestRoot !== "function" ||
