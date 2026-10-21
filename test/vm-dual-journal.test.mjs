@@ -190,3 +190,41 @@ test("every programmatic manual-recovery route refuses clearing only local dual 
   await assert.rejects(journalB.claim(two),/occupied-requires-manual-review/);
  });
 });
+test("overlapping same-process releaseStopped calls admit one completion and never clear during partial release",async()=>{
+ let calls=0,entered;
+ const firstEntered=new Promise(resolve=>{entered=resolve;});
+ let gateOpen;
+ const gate=new Promise(resolve=>{gateOpen=resolve;});
+ const midSnapshots=[];
+ let jA,jB;
+ await rig(async({journalA,journalB})=>{
+  jA=journalA;jB=journalB;
+  await journalA.claim(one);
+  await stopped(journalA,VM1);
+  // Delay the first stop proof so the second release fully overlaps it.
+  const settle=p=>p.then(value=>({ok:true,value}),error=>({ok:false,error}));
+  const first=settle(journalA.releaseStopped(VM1));
+  await firstEntered;
+  const second=await settle(journalA.releaseStopped(VM1));
+  // Third proof runs inside HostVmJournal after the local lock is gone:
+  // global must still be held and no second root may claim.
+  assert.equal(midSnapshots.length,1);
+  assert.equal(midSnapshots[0].status,"partial-dual-owner");
+  assert.match(midSnapshots[0].claim,/occupied-requires-manual-review$/);
+  gateOpen();
+  const outcomes=[second,await first];
+  assert.equal(outcomes.filter(x=>x.ok).length,1);
+  assert.equal(outcomes.filter(x=>!x.ok).length,1);
+  assert.equal((await journalA.inspect()).active,false);
+  assert.equal((await journalB.inspect()).active,false);
+ },async args=>{
+  const proofOrdinal=++calls;
+  if(proofOrdinal===1){entered();await gate;}
+  if(proofOrdinal===3){
+   const status=(await jA.inspect()).status;
+   const claim=await jB.claim(two).then(()=>"claimed",e=>e.message);
+   midSnapshots.push({status,claim});
+  }
+  return {...args,verifiedAbsent:true};
+ });
+});
