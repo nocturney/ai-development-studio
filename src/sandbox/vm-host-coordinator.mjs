@@ -41,6 +41,15 @@ function safeAbsolute(root) {
     path.resolve(root) !== path.parse(root).root &&
     root.length < 230 && !root.includes("\0") && path.normalize(root) === path.resolve(root);
 }
+// Persist only exact UTC millisecond timestamps emitted by Date#toISOString.
+// Date.parse alone silently normalizes invalid calendar dates and accepts
+// ambiguous timestamps. Durable journal corruption must fail closed.
+function validIsoTimestamp(value) {
+  if (typeof value !== "string" ||
+      !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(value)) return false;
+  const millis = Date.parse(value);
+  return Number.isFinite(millis) && new Date(millis).toISOString() === value;
+}
 function validOwner(record) {
   if (!record || typeof record !== "object" || Array.isArray(record) ||
       Object.keys(record).sort().join(",") !==
@@ -50,8 +59,9 @@ function validOwner(record) {
       !UUID.test(record.jobId) || !SHA256.test(record.manifestHash) ||
       !SID.test(record.ownerSid) || !safeAbsolute(record.jobJournalRoot) ||
       !Number.isSafeInteger(record.pid) || record.pid <= 0 ||
-      !PHASES.has(record.phase) || typeof record.createdAt !== "string" ||
-      typeof record.updatedAt !== "string") reject("invalid-record");
+      !PHASES.has(record.phase) || !validIsoTimestamp(record.createdAt) ||
+      !validIsoTimestamp(record.updatedAt) ||
+      record.createdAt > record.updatedAt) reject("invalid-record");
   return record;
 }
 async function assertExistingNoLinks(root) {
@@ -170,7 +180,7 @@ export class HostVmJournal {
       if (!current || current.vmId !== vmId || current.ownerSid !== ownerSid ||
           current.pid !== process.pid || !TRANSITIONS[current.phase].includes(phase))
         reject("invalid-transition");
-      const next = {...current,phase,updatedAt:new Date().toISOString()};
+      const next = validOwner({...current,phase,updatedAt:new Date().toISOString()});
       const temp = path.join(this.lock,".owner-"+randomUUID()+".tmp");
       // If a partial transition crashes or rename fails, the unknown extra file
       // intentionally blocks future claims/release pending explicit inspection.
