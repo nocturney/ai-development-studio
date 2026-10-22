@@ -172,3 +172,27 @@ test("job roots are not allowed to overlap with host root",async()=>{
   await assert.rejects(first.claim({...one,jobJournalRoot:path.join(shared,"jobs")}),/invalid-identity-or-root/);
  });
 });
+
+test("invalid, noncanonical or reversed host timestamps fail closed without releasing ownership",async()=>{
+ await fixture(async({first,second,one,two})=>{
+  await first.claim(one);
+  const original=await first.read();
+  const badRecords=[
+    {...original,createdAt:"not-a-date"},
+    {...original,updatedAt:""},
+    {...original,updatedAt:"2026-02-30T12:00:00.000Z"},
+    {...original,updatedAt:original.updatedAt.replace("Z","+00:00")},
+    {...original,createdAt:new Date(Date.parse(original.updatedAt)+1000).toISOString()}
+  ];
+  for(const bad of badRecords){
+   await fs.writeFile(first.recordPath,JSON.stringify(bad));
+   assert.equal((await second.inspect()).status,"indeterminate");
+   await assert.rejects(first.transition(ID1,"launch-requested",SID),/host-vm:invalid-record/);
+   await assert.rejects(second.claim(two),/occupied-requires-manual-review/);
+   assert.deepEqual(await fs.readdir(first.lock),["owner.json"]);
+  }
+  await fs.writeFile(first.recordPath,JSON.stringify(original));
+  await first.transition(ID1,"launch-requested",SID);
+  assert.equal((await first.read()).phase,"launch-requested");
+ });
+});
